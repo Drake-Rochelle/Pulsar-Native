@@ -1,28 +1,23 @@
 use gpui::*;
 use ui::{
-    dock::{Panel, PanelEvent, DockItem, DockPlacement, DockChannel},
+    dock::{Panel, PanelEvent, DockItem},
     workspace::Workspace,
-    resizable::{h_resizable, v_resizable, resizable_panel, ResizableState},
-    v_flex, h_flex,
-    ActiveTheme as _, StyledExt,
+    resizable::ResizableState,
+    v_flex,
 };
 // Zero-copy Bevy viewport for 3D rendering
 use ui::bevy_viewport::{BevyViewport, BevyViewportState};
 
 use ui::settings::EngineSettings;
-// DEPRECATED: Old software renderers - replaced by Bevy
-// use ui::ui::rainbow_engine_final::{RainbowRenderEngine, RainbowPattern};
-// use ui::ui::wgpu_3d_renderer::Wgpu3DRenderer;
 use engine_backend::services::gpu_renderer::GpuRenderer;
 use ui_common::StatusBar;
 use engine_backend::GameThread;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use std::rc::Rc;
 use std::cell::RefCell;
 
 use super::{
-    LevelEditorState, SceneBrowser, HierarchyPanel, PropertiesPanel,
+    LevelEditorState,
     ViewportPanel, ToolbarPanel, CameraMode, TransformTool,
 };
 use super::actions::*;
@@ -41,15 +36,7 @@ pub struct LevelEditorPanel {
     fps_graph_is_line: Rc<RefCell<bool>>,
 
     // UI Components
-    scene_browser: SceneBrowser,
-    hierarchy: HierarchyPanel,
-    properties: PropertiesPanel,
-    viewport_panel: ViewportPanel,
     toolbar: ToolbarPanel,
-
-    // Layout state
-    horizontal_resizable_state: Entity<ResizableState>,
-    vertical_resizable_state: Entity<ResizableState>,
 
     // Zero-copy Bevy viewport for 3D rendering
     viewport: Entity<BevyViewport>,
@@ -77,15 +64,15 @@ impl LevelEditorPanel {
     }
 
     fn new_internal(window_id: Option<u64>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let horizontal_resizable_state = ResizableState::new(cx);
-        let vertical_resizable_state = ResizableState::new(cx);
+        let _horizontal_resizable_state = ResizableState::new(cx);
+        let _vertical_resizable_state = ResizableState::new(cx);
 
         // Load engine settings for frame pacing configuration
         let settings = EngineSettings::default_path()
             .and_then(|path| Some(EngineSettings::load(&path)))
             .unwrap_or_default();
 
-        let max_viewport_fps = settings.advanced.max_viewport_fps;
+        let _max_viewport_fps = settings.advanced.max_viewport_fps;
 
         // Create Bevy viewport with zero-copy shared textures
         let viewport = cx.new(|cx| BevyViewport::new(1600, 900, cx));
@@ -93,7 +80,7 @@ impl LevelEditorPanel {
         
         // Create game thread but DON'T start it yet (editor starts in Edit mode)
         let game_thread = Arc::new(GameThread::new(240.0));
-        let game_state = game_thread.get_state();
+        let _game_state = game_thread.get_state();
         game_thread.set_enabled(false); // CRITICAL: Start disabled for Edit mode
         game_thread.start(); // Thread runs but does nothing while disabled
         
@@ -114,15 +101,15 @@ impl LevelEditorPanel {
                 engine_state.set_metadata("has_pending_viewport_renderer".to_string(), "true".to_string());
             }
         } else {
-            println!("[LEVEL-EDITOR] ❌ ERROR: No global EngineState found!");
+            tracing::info!("[LEVEL-EDITOR] ❌ ERROR: No global EngineState found!");
         }
 
         // Viewport stays transparent - Bevy renders directly to winit back buffer BEHIND GPUI
         // No texture initialization needed in GPUI - all handled in main.rs rendering loop
-        println!("[LEVEL-EDITOR] 📺 Viewport configured as transparent (Bevy renders to back buffer)");
+        tracing::info!("[LEVEL-EDITOR] 📺 Viewport configured as transparent (Bevy renders to back buffer)");
 
         
-        println!("[LEVEL-EDITOR] Modular level editor initialized");
+        tracing::info!("[LEVEL-EDITOR] Modular level editor initialized");
 
         let state = LevelEditorState::new();
         
@@ -130,13 +117,7 @@ impl LevelEditorPanel {
             focus_handle: cx.focus_handle(),
             state: LevelEditorState::new(), // Will be moved to shared_state
             fps_graph_is_line: Rc::new(RefCell::new(true)),  // Default to line graph
-            scene_browser: SceneBrowser::new(),
-            hierarchy: HierarchyPanel::new(),
-            properties: PropertiesPanel::new(),
-            viewport_panel: ViewportPanel::new(viewport.clone(), render_enabled.clone(), window, cx),
             toolbar: ToolbarPanel::new(),
-            horizontal_resizable_state,
-            vertical_resizable_state,
             viewport,
             viewport_state,
             gpu_engine: gpu_engine.clone(),
@@ -151,9 +132,8 @@ impl LevelEditorPanel {
         if self.workspace.is_some() {
             return;
         }
-        
+
         let workspace = cx.new(|cx| {
-            // Use channel 3 for level editor to isolate from main app dock (channel 0), BP editor (channel 1), and script editor (channel 2)
             Workspace::new_with_channel(
                 "level-editor-workspace",
                 ui::dock::DockChannel(3),
@@ -161,17 +141,17 @@ impl LevelEditorPanel {
                 cx
             )
         });
-        
+
         let shared_state = self.shared_state.clone();
         let fps_graph = self.fps_graph_is_line.clone();
         let gpu = self.gpu_engine.clone();
         let game = self.game_thread.clone();
         let viewport = self.viewport.clone();
         let render_enabled = self.render_enabled.clone();
-        
+
         workspace.update(cx, |workspace, cx| {
             let dock_area = workspace.dock_area().downgrade();
-            
+
             // Create viewport in center
             let viewport_panel_inner = ViewportPanel::new(viewport.clone(), render_enabled.clone(), window, cx);
             let viewport_panel = cx.new(|cx| {
@@ -185,52 +165,67 @@ impl LevelEditorPanel {
                     cx,
                 )
             });
-            
-            // Create left panels (as tabs)
-            let scene_panel = cx.new(|cx| {
-                use crate::tabs::level_editor::SceneBrowserPanel;
-                SceneBrowserPanel::new(cx)
-            });
-            
+
+            // Create right dock panels
             let hierarchy_panel = cx.new(|cx| {
                 use crate::tabs::level_editor::HierarchyPanelWrapper;
                 HierarchyPanelWrapper::new(shared_state.clone(), cx)
             });
-            
-            // Create right panels (as tabs)
             let properties_panel = cx.new(|cx| {
                 use crate::tabs::level_editor::PropertiesPanelWrapper;
                 PropertiesPanelWrapper::new(shared_state.clone(), window, cx)
             });
-            
-            // Initialize workspace with draggable tabs on both sides
-            workspace.initialize(
-                DockItem::panel(std::sync::Arc::new(viewport_panel)),
-                Some(DockItem::tabs(
-                    vec![
-                        std::sync::Arc::new(scene_panel) as std::sync::Arc<dyn ui::dock::PanelView>,
-                        std::sync::Arc::new(hierarchy_panel) as std::sync::Arc<dyn ui::dock::PanelView>,
-                    ],
-                    Some(0),
-                    &dock_area,
-                    window,
-                    cx,
-                )),
-                Some(DockItem::tabs(
-                    vec![
-                        std::sync::Arc::new(properties_panel) as std::sync::Arc<dyn ui::dock::PanelView>,
-                    ],
-                    Some(0),
-                    &dock_area,
-                    window,
-                    cx,
-                )),
-                None,
+            let world_settings_panel = cx.new(|cx| {
+                use crate::tabs::level_editor::WorldSettingsPanel;
+                WorldSettingsPanel::new(shared_state.clone(), cx)
+            });
+
+            // Bottom right: tabs for Properties and World Settings
+            let bottom_tabs = DockItem::tabs(
+                vec![
+                    std::sync::Arc::new(properties_panel) as std::sync::Arc<dyn ui::dock::PanelView>,
+                    std::sync::Arc::new(world_settings_panel) as std::sync::Arc<dyn ui::dock::PanelView>,
+                ],
+                Some(0),
+                &dock_area,
                 window,
                 cx,
             );
+
+            // Top right: hierarchy panel (as a single-tab TabPanel)
+            let top_hierarchy = DockItem::tabs(
+                vec![std::sync::Arc::new(hierarchy_panel) as std::sync::Arc<dyn ui::dock::PanelView>],
+                Some(0),
+                &dock_area,
+                window,
+                cx,
+            );
+
+            // Compose right dock as a vertical split: top = hierarchy (25%), bottom = tabs (75%)
+            // Hierarchy gets smaller fixed size, Properties/World gets larger
+            let right = ui::dock::DockItem::split_with_sizes(
+                gpui::Axis::Vertical,
+                vec![top_hierarchy, bottom_tabs],
+                vec![Some(px(150.0)), Some(px(550.0))],  // 150px hierarchy, 550px for Properties/World
+                &dock_area,
+                window,
+                cx,
+            );
+
+            // Set center and right dock only (no left dock, matching DAW approach)
+            let center_tabs = DockItem::tabs(
+                vec![std::sync::Arc::new(viewport_panel) as std::sync::Arc<dyn ui::dock::PanelView>],
+                Some(0),
+                &dock_area,
+                window,
+                cx,
+            );
+            let _ = dock_area.update(cx, |dock_area, cx| {
+                dock_area.set_center(center_tabs, window, cx);
+                dock_area.set_right_dock(right, Some(px(400.0)), true, window, cx);
+            });
         });
-        
+
         self.workspace = Some(workspace);
     }
 
@@ -529,12 +524,12 @@ impl LevelEditorPanel {
         if let Some(ref path) = self.state.current_scene {
             match self.state.scene_database.save_to_file(path) {
                 Ok(_) => {
-                    println!("[LEVEL-EDITOR] 💾 Scene saved: {:?}", path);
+                    tracing::info!("[LEVEL-EDITOR] 💾 Scene saved: {:?}", path);
                     self.state.has_unsaved_changes = false;
                     cx.notify();
                 }
                 Err(e) => {
-                    println!("[LEVEL-EDITOR] ❌ Failed to save scene: {}", e);
+                    tracing::info!("[LEVEL-EDITOR] ❌ Failed to save scene: {}", e);
                 }
             }
         }
@@ -542,16 +537,16 @@ impl LevelEditorPanel {
     
     fn on_save_scene_as(&mut self, _: &SaveSceneAs, _window: &mut Window, cx: &mut Context<Self>) {
         // TODO: Implement async file dialog
-        println!("[LEVEL-EDITOR] 💾 Save Scene As - TODO");
+        tracing::info!("[LEVEL-EDITOR] 💾 Save Scene As - TODO");
         if let Some(ref path) = self.state.current_scene {
             match self.state.scene_database.save_to_file(path) {
                 Ok(_) => {
-                    println!("[LEVEL-EDITOR] 💾 Scene saved: {:?}", path);
+                    tracing::info!("[LEVEL-EDITOR] 💾 Scene saved: {:?}", path);
                     self.state.has_unsaved_changes = false;
                     cx.notify();
                 }
                 Err(e) => {
-                    println!("[LEVEL-EDITOR] ❌ Failed to save scene: {}", e);
+                    tracing::info!("[LEVEL-EDITOR] ❌ Failed to save scene: {}", e);
                 }
             }
         }
@@ -559,7 +554,7 @@ impl LevelEditorPanel {
     
     fn on_open_scene(&mut self, _: &OpenScene, _window: &mut Window, cx: &mut Context<Self>) {
         // TODO: Implement async file dialog
-        println!("[LEVEL-EDITOR] 📂 Open Scene - TODO");
+        tracing::info!("[LEVEL-EDITOR] 📂 Open Scene - TODO");
         cx.notify();
     }
     
@@ -577,7 +572,7 @@ impl LevelEditorPanel {
         // Re-add default objects
         self.state.scene_database = crate::tabs::level_editor::SceneDatabase::with_default_scene();
         
-        println!("[LEVEL-EDITOR] 📄 New scene created");
+        tracing::info!("[LEVEL-EDITOR] 📄 New scene created");
         cx.notify();
     }
 
@@ -585,8 +580,8 @@ impl LevelEditorPanel {
         // Toggle snapping in gizmo state
         let mut gizmo_state = self.state.gizmo_state.write();
         gizmo_state.toggle_snap();
-        let enabled = gizmo_state.snap_enabled;
-        let increment = gizmo_state.snap_increment;
+        let _enabled = gizmo_state.snap_enabled;
+        let _increment = gizmo_state.snap_increment;
         drop(gizmo_state);
 
         cx.notify();
@@ -596,7 +591,7 @@ impl LevelEditorPanel {
         // Toggle local/world space in gizmo state
         let mut gizmo_state = self.state.gizmo_state.write();
         gizmo_state.toggle_space();
-        let is_local = gizmo_state.local_space;
+        let _is_local = gizmo_state.local_space;
         drop(gizmo_state);
 
         cx.notify();
@@ -606,7 +601,7 @@ impl LevelEditorPanel {
         let mut gizmo_state = self.state.gizmo_state.write();
         // Double the snap increment (0.25, 0.5, 1.0, 2.0, 4.0, etc.)
         gizmo_state.snap_increment = (gizmo_state.snap_increment * 2.0).min(10.0);
-        let increment = gizmo_state.snap_increment;
+        let _increment = gizmo_state.snap_increment;
         drop(gizmo_state);
 
         cx.notify();
@@ -616,7 +611,7 @@ impl LevelEditorPanel {
         let mut gizmo_state = self.state.gizmo_state.write();
         // Halve the snap increment (10.0, 5.0, 2.5, 1.0, 0.5, 0.25, etc.)
         gizmo_state.snap_increment = (gizmo_state.snap_increment / 2.0).max(0.1);
-        let increment = gizmo_state.snap_increment;
+        let _increment = gizmo_state.snap_increment;
         drop(gizmo_state);
 
         cx.notify();
@@ -624,7 +619,7 @@ impl LevelEditorPanel {
 
     fn on_focus_selected(&mut self, _: &FocusSelected, window: &mut Window, cx: &mut Context<Self>) {
         // TODO: Frame selected object in viewport (move camera to focus on selection)
-        if let Some(obj) = self.state.get_selected_object() {
+        if let Some(_obj) = self.state.get_selected_object() {
             // For now just log - implementing camera movement would require Bevy camera manipulation
         }
         cx.notify();
@@ -694,12 +689,12 @@ impl Render for LevelEditorPanel {
                     if bevy_selected_id != gpui_selected_id {
                         // Bevy has a different selection - sync to GPUI!
                         if let Some(ref new_id) = bevy_selected_id {
-                            println!("[LEVEL-EDITOR] 🔄 Syncing selection from Bevy: {}", new_id);
+                            tracing::info!("[LEVEL-EDITOR] 🔄 Syncing selection from Bevy: {}", new_id);
                             self.shared_state.write().select_object(Some(new_id.clone()));
                             cx.notify(); // Trigger UI update
                         } else {
                             // Bevy deselected
-                            println!("[LEVEL-EDITOR] 🔄 Syncing deselection from Bevy");
+                            tracing::info!("[LEVEL-EDITOR] 🔄 Syncing deselection from Bevy");
                             self.shared_state.write().select_object(None);
                             cx.notify();
                         }

@@ -186,7 +186,7 @@ pub fn handle_mouse_input(
 
         match state {
             ElementState::Pressed => {
-                eprintln!("🖱️ MouseInput PRESSED: {:?} at {:?}", button, position);
+                tracing::debug!("🖱️ MouseInput PRESSED: {:?} at {:?}", button, position);
 
                 // Track pressed button
                 window_state.pressed_mouse_buttons.insert(gpui_button);
@@ -202,9 +202,9 @@ pub fn handle_mouse_input(
                     first_mouse: false,
                 });
 
-                eprintln!("🔽 Injecting MouseDown event...");
+                tracing::debug!("🔽 Injecting MouseDown event...");
                 let result = window_state.gpui_app.update(|cx| gpui_window_ref.inject_input_event(cx, gpui_event));
-                eprintln!("📊 MouseDown result: {:?}", result);
+                tracing::debug!("📊 MouseDown result: {:?}", result);
 
                 // Check if GPUI handled the event (e.g., button was clicked)
                 // Event is handled if propagate is false (stopped) or default was prevented
@@ -213,7 +213,7 @@ pub fn handle_mouse_input(
                 }
             }
             ElementState::Released => {
-                eprintln!("🖱️ MouseInput RELEASED: {:?}", button);
+                tracing::debug!("🖱️ MouseInput RELEASED: {:?}", button);
 
                 // Remove pressed button
                 window_state.pressed_mouse_buttons.remove(&gpui_button);
@@ -225,9 +225,9 @@ pub fn handle_mouse_input(
                     click_count: window_state.click_state.current_count,
                 });
 
-                eprintln!("🔽 Injecting MouseUp event...");
+                tracing::debug!("🔽 Injecting MouseUp event...");
                 let result = window_state.gpui_app.update(|cx| gpui_window_ref.inject_input_event(cx, gpui_event));
-                eprintln!("📊 MouseUp result: {:?}", result);
+                tracing::debug!("📊 MouseUp result: {:?}", result);
 
                 // Event is handled if propagate is false (stopped) or default was prevented
                 if let Ok(dispatch_result) = result {
@@ -265,9 +265,9 @@ pub fn handle_mouse_input(
         ) {
             // Start window resize
             if let Err(e) = window_state.winit_window.drag_resize_window(direction) {
-                eprintln!("❌ Failed to start window resize: {:?}", e);
+                tracing::error!("❌ Failed to start window resize: {:?}", e);
             } else {
-                println!("🔲 Starting window resize: {:?}", direction);
+                tracing::info!("🔲 Starting window resize: {:?}", direction);
             }
             return;
         }
@@ -282,9 +282,9 @@ pub fn handle_mouse_input(
         ) {
             // Start window drag
             if let Err(e) = window_state.winit_window.drag_window() {
-                eprintln!("❌ Failed to start window drag: {:?}", e);
+                tracing::error!("❌ Failed to start window drag: {:?}", e);
             } else {
-                println!("👆 Starting window drag from titlebar");
+                tracing::info!("👆 Starting window drag from titlebar");
             }
         }
     }

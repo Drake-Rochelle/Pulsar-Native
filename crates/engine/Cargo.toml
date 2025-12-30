@@ -3,7 +3,7 @@ edition = "2021"
 name = "pulsar_engine"
 description = "A modern high-performance game engine written in Rust"
 publish = false
-version = "0.1.54"
+version = "0.1.81"
 
 [profile.dev.package."*"]
 opt-level = 3
@@ -65,6 +65,8 @@ git2 = "0.19"
 directories = "5"
 toml = "0.8"
 parking_lot = "0.12"
+sysuri.workspace = true
+urlencoding.workspace = true
 open = "5"
 lsp-types.workspace = true
 ropey.workspace = true

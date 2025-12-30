@@ -288,7 +288,7 @@ impl InputState {
             pan_delta_x: Arc::new(AtomicI32::new(0)),
             pan_delta_y: Arc::new(AtomicI32::new(0)),
             zoom_delta: Arc::new(AtomicI32::new(0)),
-            move_speed: Arc::new(AtomicI32::new(1000)), // 10.0 * 100
+            move_speed: Arc::new(AtomicI32::new(2000)), // 20.0 * 100
             input_latency_us: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
@@ -503,8 +503,8 @@ impl ViewportPanel {
             let locked_cursor_y = self.locked_cursor_y.clone();
             
             std::thread::spawn(move || {
-                println!("[INPUT-THREAD] 🚀 Dedicated RAW INPUT processing thread started");
-                println!("[INPUT-THREAD] 🎯 Activated by GPUI right-click, deactivated by GPUI release");
+                tracing::info!("[INPUT-THREAD] 🚀 Dedicated RAW INPUT processing thread started");
+                tracing::info!("[INPUT-THREAD] 🎯 Activated by GPUI right-click, deactivated by GPUI release");
                 let device_state = DeviceState::new();
                 let mut last_mouse_pos: Option<(i32, i32)> = None;
                 
@@ -781,7 +781,7 @@ impl ViewportPanel {
                 let locked_cursor_screen_y = self.locked_cursor_screen_y.clone();
                 let input_state_clone = self.input_state.clone();
                 move |event, window, _cx| {
-                    println!("[VIEWPORT] 🖱️ Right-click DOWN on viewport - ACTIVATING camera controls");
+                    tracing::info!("[VIEWPORT] 🖱️ Right-click DOWN on viewport - ACTIVATING camera controls");
 
                     // Check if Shift is held for pan mode
                     let shift_pressed = event.modifiers.shift;
@@ -797,12 +797,12 @@ impl ViewportPanel {
                         locked_cursor_y.store(screen_y, Ordering::Relaxed);
                         locked_cursor_screen_x.store(screen_x, Ordering::Relaxed);
                         locked_cursor_screen_y.store(screen_y, Ordering::Relaxed);
-                        println!("[VIEWPORT] 📍 Locked cursor at screen position ({}, {})", screen_x, screen_y);
+                        tracing::info!("[VIEWPORT] 📍 Locked cursor at screen position ({}, {})", screen_x, screen_y);
 
                         // Confine cursor to window bounds (less aggressive than point lock)
                         lock_cursor_to_window(window);
                     } else {
-                        println!("[VIEWPORT] ⚠️ Failed to convert window position to screen position");
+                        tracing::info!("[VIEWPORT] ⚠️ Failed to convert window position to screen position");
                         // Fallback: lock to window bounds
                         lock_cursor_to_window(window);
                     }
@@ -816,11 +816,11 @@ impl ViewportPanel {
                     if shift_pressed {
                         // Shift + Right = Pan mode
                         mouse_middle_captured.store(true, Ordering::Release);
-                        println!("[VIEWPORT] 🎥 Pan mode activated (Shift + Right)");
+                        tracing::info!("[VIEWPORT] 🎥 Pan mode activated (Shift + Right)");
                     } else {
                         // Right alone = Rotate mode
                         mouse_right_captured.store(true, Ordering::Release);
-                        println!("[VIEWPORT] 🎥 Rotate mode activated (Right)");
+                        tracing::info!("[VIEWPORT] 🎥 Rotate mode activated (Right)");
                     }
 
                     // Hide cursor using proper Windows API
@@ -835,7 +835,7 @@ impl ViewportPanel {
                 let locked_cursor_screen_x = self.locked_cursor_screen_x.clone();
                 let locked_cursor_screen_y = self.locked_cursor_screen_y.clone();
                 move |_event, window, _cx| {
-                    println!("[VIEWPORT] 🖱️ Right-click UP - DEACTIVATING camera controls");
+                    tracing::info!("[VIEWPORT] 🖱️ Right-click UP - DEACTIVATING camera controls");
 
                     // Deactivate both modes
                     mouse_right_captured.store(false, Ordering::Release);
@@ -850,7 +850,7 @@ impl ViewportPanel {
                     window.set_window_cursor_style(CursorStyle::Arrow); // Also set GPUI style
                     unlock_cursor();
 
-                    println!("[VIEWPORT] ✅ Camera controls deactivated, cursor restored");
+                    tracing::info!("[VIEWPORT] ✅ Camera controls deactivated, cursor restored");
                 }
             })
             // Left-click for object selection in edit mode
@@ -858,7 +858,7 @@ impl ViewportPanel {
                 let gpu_engine_click = gpu_engine_for_click.clone();
                 let element_bounds = element_bounds_for_click.clone();
                 move |event: &gpui::MouseDownEvent, window: &mut gpui::Window, _cx: &mut gpui::App| {
-                    println!("[VIEWPORT] 🖱️ Left-click detected at window position: {:?}", event.position);
+                    tracing::info!("[VIEWPORT] 🖱️ Left-click detected at window position: {:?}", event.position);
                     
                     // Convert window coordinates to element-relative coordinates
                     let bounds_opt = element_bounds.borrow();
@@ -875,13 +875,13 @@ impl ViewportPanel {
                         let elem_x = pos_x - origin_x;
                         let elem_y = pos_y - origin_y;
                         
-                        println!("[VIEWPORT] 📐 Element-relative position: ({:.1}, {:.1}) in viewport ({:.1}x{:.1})", 
+                        tracing::info!("[VIEWPORT] 📐 Element-relative position: ({:.1}, {:.1}) in viewport ({:.1}x{:.1})", 
                             elem_x, elem_y, width, height);
                         
                         (elem_x, elem_y, width, height)
                     } else {
                         // Fallback: use window coordinates (first frame before bounds captured)
-                        println!("[VIEWPORT] ⚠️ Element bounds not yet captured, using window coords");
+                        tracing::info!("[VIEWPORT] ⚠️ Element bounds not yet captured, using window coords");
                         let window_size = window.viewport_size();
                         let pos_x: f32 = event.position.x.into();
                         let pos_y: f32 = event.position.y.into();
@@ -894,7 +894,7 @@ impl ViewportPanel {
                     let normalized_x = (element_x / viewport_width).clamp(0.0, 1.0);
                     let normalized_y = (element_y / viewport_height).clamp(0.0, 1.0);
                     
-                    println!("[VIEWPORT] 🎯 Normalized position: ({:.3}, {:.3})", normalized_x, normalized_y);
+                    tracing::info!("[VIEWPORT] 🎯 Normalized position: ({:.3}, {:.3})", normalized_x, normalized_y);
                     
                     // Send to Bevy's ViewportMouseInput via shared resource
                     if let Ok(engine) = gpu_engine_click.try_lock() {
@@ -907,12 +907,12 @@ impl ViewportPanel {
                             mouse_input.left_clicked = true;
                             mouse_input.left_down = true;
                             
-                            println!("[VIEWPORT] ✅ Sent click to Bevy (will be processed by raycast system)");
+                            tracing::info!("[VIEWPORT] ✅ Sent click to Bevy (will be processed by raycast system)");
                         } else {
-                            println!("[VIEWPORT] ⚠️ Bevy renderer not available");
+                            tracing::info!("[VIEWPORT] ⚠️ Bevy renderer not available");
                         }
                     } else {
-                        println!("[VIEWPORT] ⚠️ Could not lock GPU engine for click event");
+                        tracing::info!("[VIEWPORT] ⚠️ Could not lock GPU engine for click event");
                     }
                 }
             })
@@ -1361,27 +1361,46 @@ impl ViewportPanel {
                     })
             )
             .child(
-                // Total frame time
+                // Column headers row
                 h_flex()
                     .w_full()
                     .items_center()
-                    .justify_between()
+                    .mt_1()
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Frame Time:")
+                        // Color indicator column
+                        div().w(px(16.0)).flex_none()
                     )
                     .child(
+                        // Pass name header
                         div()
+                            .w(px(200.0))
+                            .flex_none()
                             .text_xs()
                             .font_semibold()
-                            .text_color(foreground)
-                            .child(if let Some(ref data) = gpu_data {
-                                format!("{:.2}ms ({:.0} FPS)", data.total_frame_ms, data.fps)
-                            } else {
-                                "N/A".to_string()
-                            })
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Pass")
+                    )
+                    .child(
+                        // Time header
+                        div()
+                            .w(px(60.0))
+                            .flex_none()
+                            .text_right()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Time")
+                    )
+                    .child(
+                        // Percentage header
+                        div()
+                            .w(px(50.0))
+                            .flex_none()
+                            .text_right()
+                            .text_xs()
+                            .font_semibold()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("%")
                     )
             )
             .child(
@@ -1397,7 +1416,7 @@ impl ViewportPanel {
             result = result.child(elem);
         }
         
-        // Add separator and total
+        // Add separator and totals
         if let Some(ref data) = gpu_data {
             result = result
                 .child(
@@ -1407,20 +1426,31 @@ impl ViewportPanel {
                         .bg(border)
                         .mt_1()
                 )
+                // Total GPU row - matching column layout
                 .child(
                     h_flex()
                         .w_full()
                         .items_center()
-                        .justify_between()
                         .child(
+                            // Empty color indicator column
+                            div().w(px(16.0)).flex_none()
+                        )
+                        .child(
+                            // Label column
                             div()
+                                .w(px(200.0))
+                                .flex_none()
                                 .text_xs()
                                 .font_semibold()
                                 .text_color(foreground)
-                                .child("Total GPU:")
+                                .child("Total GPU")
                         )
                         .child(
+                            // Time value - color coded by performance
                             div()
+                                .w(px(60.0))
+                                .flex_none()
+                                .text_right()
                                 .text_xs()
                                 .font_semibold()
                                 .text_color(if data.total_gpu_ms < 8.0 {
@@ -1432,6 +1462,58 @@ impl ViewportPanel {
                                 })
                                 .child(format!("{:.2}ms", data.total_gpu_ms))
                         )
+                        .child(
+                            // 100% for total
+                            div()
+                                .w(px(50.0))
+                                .flex_none()
+                                .text_right()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("100.0%")
+                        )
+                )
+                // Frame time row
+                .child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .child(
+                            div().w(px(16.0)).flex_none()
+                        )
+                        .child(
+                            div()
+                                .w(px(200.0))
+                                .flex_none()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("Frame Time")
+                        )
+                        .child(
+                            div()
+                                .w(px(60.0))
+                                .flex_none()
+                                .text_right()
+                                .text_xs()
+                                .text_color(foreground)
+                                .child(format!("{:.2}ms", data.total_frame_ms))
+                        )
+                        .child(
+                            div()
+                                .w(px(50.0))
+                                .flex_none()
+                                .text_right()
+                                .text_xs()
+                                .font_semibold()
+                                .text_color(if data.fps > 60.0 {
+                                    success
+                                } else if data.fps > 30.0 {
+                                    warning
+                                } else {
+                                    cx.theme().danger
+                                })
+                                .child(format!("{:.0} FPS", data.fps))
+                        )
                 );
         }
         
@@ -1439,6 +1521,7 @@ impl ViewportPanel {
     }
 
     /// Render a single GPU pass stat line with timing and percentage
+    /// Uses fixed-width columns for proper alignment
     fn render_pass_stat_elem<V: 'static>(
         name: String,
         time_ms: f32,
@@ -1454,36 +1537,48 @@ impl ViewportPanel {
         h_flex()
             .w_full()
             .items_center()
-            .gap_2()
             .child(
-                // Color indicator
+                // Color indicator column - 16px total width
                 div()
-                    .w(px(8.0))
-                    .h(px(8.0))
-                    .rounded(px(2.0))
-                    .bg(color)
+                    .w(px(16.0))
+                    .flex_none()
+                    .child(
+                        div()
+                            .w(px(8.0))
+                            .h(px(8.0))
+                            .rounded(px(2.0))
+                            .bg(color)
+                    )
             )
             .child(
-                // Name
+                // Name column - fixed 200px width
                 div()
-                    .flex_1()
+                    .w(px(200.0))
+                    .flex_none()
+                    .overflow_hidden()
                     .text_xs()
                     .text_color(theme.muted_foreground)
                     .child(name)
             )
             .child(
-                // Timing
+                // Timing column - fixed 60px, right-aligned
                 div()
+                    .w(px(60.0))
+                    .flex_none()
+                    .text_right()
                     .text_xs()
                     .text_color(theme.foreground)
                     .child(format!("{:.2}ms", time_ms))
             )
             .child(
-                // Percentage
+                // Percentage column - fixed 50px, right-aligned
                 div()
+                    .w(px(50.0))
+                    .flex_none()
+                    .text_right()
                     .text_xs()
                     .text_color(theme.muted_foreground)
-                    .child(format!("({:.1}%)", percent))
+                    .child(format!("{:.1}%", percent))
             )
     }
 
@@ -2312,6 +2407,7 @@ impl ViewportPanel {
                         )
                         .child(
                             div()
+                                .relative()
                                 .h(px(80.))
                                 .w_full()
                                 .child(if *fps_graph_state.borrow() {
@@ -2319,7 +2415,6 @@ impl ViewportPanel {
                                     let theme = cx.theme();
                                     let stroke_color = theme.chart_3;
                                     let fill_color = stroke_color.opacity(0.2);
-                                    
                                     AreaChart::new(frame_time_data.clone())
                                         .x(|d| SharedString::from(format!("{}", d.index)))
                                         .y(|d| d.frame_time_ms)
@@ -2327,17 +2422,24 @@ impl ViewportPanel {
                                         .fill(fill_color)
                                         .linear()
                                         .tick_margin(10)
+                                        .min_y_range(16.6)
+                                        .reference_line(33.3, cx.theme().accent.opacity(0.3), SharedString::from("30fps (33.3ms)"))
+                                        .reference_line(16.6, cx.theme().success.opacity(0.3), SharedString::from("60fps (16.6ms)"))
+                                        .reference_line(8.3, cx.theme().warning.opacity(0.3), SharedString::from("120fps (8.3ms)"))
                                         .into_any_element()
                                 } else {
                                     // Bar mode
                                     let theme = cx.theme();
                                     let chart_color = theme.chart_3;
-                                    
                                     BarChart::new(frame_time_data.clone())
                                         .x(|d| SharedString::from(format!("{}", d.index)))
                                         .y(|d| d.frame_time_ms)
                                         .fill(move |_d| chart_color)
                                         .tick_margin(10)
+                                        .min_y_range(16.6)
+                                        .reference_line(33.3, cx.theme().accent.opacity(0.3), SharedString::from("30fps (33.3ms)"))
+                                        .reference_line(16.6, cx.theme().success.opacity(0.3), SharedString::from("60fps (16.6ms)"))
+                                        .reference_line(8.3, cx.theme().warning.opacity(0.3), SharedString::from("120fps (8.3ms)"))
                                         .into_any_element()
                                 })
                         )

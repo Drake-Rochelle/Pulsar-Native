@@ -4,6 +4,7 @@ use std::{path::PathBuf, sync::Arc};
 use gpui::{AppContext, Context, Entity, Window};
 use ui::dock::DockItem;
 use ui_editor::{FileManagerDrawer, LevelEditorPanel, ProblemsDrawer, TerminalDrawer};
+use ui_type_debugger::TypeDebuggerDrawer;
 use ui_entry::EntryScreen;
 use plugin_manager::PluginManager;
 use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
@@ -132,6 +133,7 @@ impl PulsarApp {
         // Create drawers
         let file_manager_drawer = cx.new(|cx| FileManagerDrawer::new(project_path.clone(), window, cx));
         let problems_drawer = cx.new(|cx| ProblemsDrawer::new(window, cx));
+        let type_debugger_drawer = cx.new(|cx| TypeDebuggerDrawer::new(window, cx));
         let terminal_drawer = cx.new(|cx| TerminalDrawer::new(window, cx));
 
         // Subscribe to drawer events
@@ -196,6 +198,7 @@ impl PulsarApp {
                 drawer_height: 400.0,
                 drawer_resizing: false,
                 problems_drawer,
+                type_debugger_drawer,
                 terminal_drawer,
                 center_tabs,
                 script_editor: None,
@@ -219,6 +222,32 @@ impl PulsarApp {
                 focus_handle: cx.focus_handle(),
             },
         };
+
+        // Update file manager drawer with registered file types from plugin manager
+        let file_types: Vec<plugin_editor_api::FileTypeDefinition> = app.state.plugin_manager
+            .file_type_registry()
+            .get_all_file_types()
+            .into_iter()
+            .cloned()
+            .collect();
+
+        app.state.file_manager_drawer.update(cx, |drawer, cx| {
+            drawer.update_file_types(file_types);
+            cx.notify();
+        });
+
+        // Sync TypeDatabase to UI if we have a project
+        if has_project {
+            if let Some(engine_state) = engine_state::EngineState::global() {
+                if let Some(type_database) = engine_state.type_database() {
+                    let types = type_database.all();
+                    tracing::info!("📊 Syncing {} types to TypeDebuggerDrawer", types.len());
+                    app.state.type_debugger_drawer.update(cx, |drawer, cx| {
+                        drawer.set_types(types, cx);
+                    });
+                }
+            }
+        }
 
         // Update Discord presence with initial tab if project is loaded
         if has_project && create_level_editor {

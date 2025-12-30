@@ -12,8 +12,6 @@ members = [
     # Plugin system
     "crates/plugin_editor_api",
     "crates/plugin_manager",
-    # Editor plugins
-    "plugins/blueprint_editor_plugin",
     # UI component crates
     "ui-crates/ui_common",
     "ui-crates/ui_core",
@@ -33,6 +31,8 @@ members = [
     "ui-crates/ui_enum_editor",
     "ui-crates/ui_trait_editor",
     "ui-crates/ui_alias_editor",
+    "ui-crates/ui_type_debugger",
+    "crates/type_db",
 ]
 
 default-members = ["crates/engine"]
@@ -43,16 +43,21 @@ debug = true
 
 [workspace.dependencies]
 ######################### TGPUI #########################
-gpui = { git = "https://github.com/tristanpoland/zed", rev="433b9ae0dce0e0dae03c4ac44d70575c981c530c", features = ["runtime_shaders", "macos-blade"] }
-gpui_macros = { git = "https://github.com/tristanpoland/zed", rev="433b9ae0dce0e0dae03c4ac44d70575c981c530c" }
-reqwest_client = { git = "https://github.com/tristanpoland/zed", rev = "433b9ae0dce0e0dae03c4ac44d70575c981c530c" }
-sum_tree = { git = "https://github.com/tristanpoland/zed", rev = "433b9ae0dce0e0dae03c4ac44d70575c981c530c" }
+gpui = { git = "https://github.com/tristanpoland/zed", rev="2047043a00dc138e3d8127c8921c96927acea8f8", features = ["runtime_shaders", "macos-blade"] }
+gpui_macros = { git = "https://github.com/tristanpoland/zed", rev="2047043a00dc138e3d8127c8921c96927acea8f8" }
+reqwest_client = { git = "https://github.com/tristanpoland/zed", rev = "2047043a00dc138e3d8127c8921c96927acea8f8" }
+sum_tree = { git = "https://github.com/tristanpoland/zed", rev = "2047043a00dc138e3d8127c8921c96927acea8f8" }
 
 ###################### Local WGPUI ######################
 # gpui = { path = "C:/Users/redst/OneDrive/Documents/GitHub/gpui-ce/crates/gpui", features = ["runtime_shaders", "macos-blade"] }
 # gpui_macros = { path = "C:/Users/redst/OneDrive/Documents/GitHub/gpui-ce/crates/gpui_macros" }
 # reqwest_client = { path = "C:/Users/redst/OneDrive/Documents/GitHub/gpui-ce/crates/reqwest_client" }
 # sum_tree = { path = "C:/Users/redst/OneDrive/Documents/GitHub/gpui-ce/crates/sum_tree" }
+
+#gpui = { path = "C:/Users/redst/OneDrive/Documents/GitHub/zed/crates/gpui", features = ["runtime_shaders", "macos-blade"] }
+#gpui_macros = { path = "C:/Users/redst/OneDrive/Documents/GitHub/zed/crates/gpui_macros" }
+#reqwest_client = { path = "C:/Users/redst/OneDrive/Documents/GitHub/zed/crates/reqwest_client" }
+#sum_tree = { path = "C:/Users/redst/OneDrive/Documents/GitHub/zed/crates/sum_tree" }
 
 ######################### WGPUI #########################
 # gpui = { git = "https://github.com/Far-Beyond-Pulsar/WGPUI", rev="6f6e5f30a5306a08e9a409ad39b9a0458f0ddf01", features = ["runtime_shaders", "macos-blade"] }
@@ -71,7 +76,7 @@ engine_fs = { path = "crates/engine_fs" }
 
 # UI component crates
 ui_core = { path = "ui-crates/ui_core" }
-ui_entry = { path = "ui-crates/ui_entry" }
+ui_entry = { path = "ui-crates/ui_entry" }  
 ui_editor = { path = "ui-crates/ui_editor" }
 ui_settings = { path = "ui-crates/ui_settings" }
 ui_multiplayer = { path = "ui-crates/ui_multiplayer" }
@@ -89,6 +94,8 @@ ui_struct_editor = { path = "ui-crates/ui_struct_editor" }
 ui_enum_editor = { path = "ui-crates/ui_enum_editor" }
 ui_trait_editor = { path = "ui-crates/ui_trait_editor" }
 ui_alias_editor = { path = "ui-crates/ui_alias_editor" }
+ui_type_debugger = { path = "ui-crates/ui_type_debugger" }
+type_db = { path = "crates/type_db" }
 
 anyhow = "1"
 log = "0.4"
@@ -107,6 +114,8 @@ lsp-types = "0.97.0"
 directories = "5"
 itertools = "0.13"
 rapier3d = { version = "*", features = [ "simd-stable" ] }
+sysuri = "0.2"
+urlencoding = "2.1"
 
 [workspace.dependencies.windows]
 features = ["Wdk", "Wdk_System", "Wdk_System_SystemServices", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_Graphics_Direct3D_Fxc"]

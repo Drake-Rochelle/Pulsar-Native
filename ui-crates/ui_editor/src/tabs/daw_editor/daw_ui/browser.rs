@@ -12,17 +12,10 @@ use ui::{
     badge::Badge,
 };
 
-const BROWSER_WIDTH: f32 = 280.0;
-
 pub fn render_browser(state: &mut DawUiState, cx: &mut Context<DawPanel>) -> impl IntoElement {
     v_flex()
-        .w(px(BROWSER_WIDTH))
-        .h_full()
+        .size_full()
         .bg(cx.theme().background)
-        .border_r_1()
-        .border_color(cx.theme().border)
-        // Tab bar with icons
-        .child(render_browser_tabs(state, cx))
         // Search bar
         .child(render_search_bar(state, cx))
         // Toolbar with actions
@@ -31,50 +24,6 @@ pub fn render_browser(state: &mut DawUiState, cx: &mut Context<DawPanel>) -> imp
         .child(render_browser_content(state, cx))
         // Stats footer
         .child(render_browser_footer(state, cx))
-}
-
-fn render_browser_tabs(state: &mut DawUiState, cx: &mut Context<DawPanel>) -> impl IntoElement {
-    let current = state.browser_tab;
-
-    v_flex()
-        .w_full()
-        .border_b_1()
-        .border_color(cx.theme().border)
-        .child(
-            h_flex()
-                .w_full()
-                .h(px(44.0))
-                .px_2()
-                .gap_1()
-                .items_center()
-                .bg(cx.theme().muted.opacity(0.2))
-                .child(render_tab_button("Files", IconName::FolderOpen, BrowserTab::Files, current, cx))
-                .child(render_tab_button("Instruments", IconName::Album, BrowserTab::Instruments, current, cx))
-                .child(render_tab_button("FX", IconName::Activity, BrowserTab::Effects, current, cx))
-                .child(render_tab_button("Loops", IconName::AlbumCarousel, BrowserTab::Loops, current, cx))
-        )
-}
-
-fn render_tab_button(
-    label: &'static str,
-    icon: IconName,
-    tab: BrowserTab,
-    current: BrowserTab,
-    cx: &mut Context<DawPanel>,
-) -> impl IntoElement {
-    let is_active = tab == current;
-
-    Button::new(ElementId::Name(format!("browser-tab-{:?}", tab).into()))
-        .icon(Icon::new(icon).size_4())
-        .ghost()
-        .compact()
-        .small()
-        .when(is_active, |btn| btn.selected(true))
-        .tooltip(label)
-        .on_click(cx.listener(move |this, _, _window, cx| {
-            this.state.browser_tab = tab;
-            cx.notify();
-        }))
 }
 
 fn render_search_bar(state: &mut DawUiState, cx: &mut Context<DawPanel>) -> impl IntoElement {
@@ -354,7 +303,7 @@ fn render_audio_file_item(
         // Handle click to start drag
         .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &MouseDownEvent, _window, cx| {
             // Set drag state
-            eprintln!("🎵 Starting drag for file: {} at path: {:?}", file_name_for_closure, file_path);
+            tracing::error!("🎵 Starting drag for file: {} at path: {:?}", file_name_for_closure, file_path);
             this.state.drag_state = DragState::DraggingFile {
                 file_path: file_path.clone(),
                 file_name: file_name_for_closure.clone(),
@@ -559,7 +508,7 @@ fn handle_import_audio(_state: &mut DawUiState, _window: &mut Window, cx: &mut C
                 let _ = cx.update(|cx| {
                     let _ = this.update(cx, |this, cx| {
                         if let Ok(_) = this.state.import_audio_file(source) {
-                            println!("✅ Audio file imported successfully");
+                            tracing::info!("✅ Audio file imported successfully");
                         }
                         cx.notify();
                     });

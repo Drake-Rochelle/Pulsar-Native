@@ -18,9 +18,7 @@ pub struct TimelinePanel {
 }
 
 impl TimelinePanel {
-    pub fn new(state: Arc<RwLock<DawUiState>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let daw_panel = cx.new(|cx| DawPanel::new(window, cx));
-        
+    pub fn new(state: Arc<RwLock<DawUiState>>, daw_panel: Entity<DawPanel>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             state,
             daw_panel,
@@ -74,9 +72,7 @@ pub struct MixerPanel {
 }
 
 impl MixerPanel {
-    pub fn new(state: Arc<RwLock<DawUiState>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let daw_panel = cx.new(|cx| DawPanel::new(window, cx));
-        
+    pub fn new(state: Arc<RwLock<DawUiState>>, daw_panel: Entity<DawPanel>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             state,
             daw_panel,
@@ -120,9 +116,7 @@ pub struct BrowserFilesPanel {
 }
 
 impl BrowserFilesPanel {
-    pub fn new(state: Arc<RwLock<DawUiState>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let daw_panel = cx.new(|cx| DawPanel::new(window, cx));
-        
+    pub fn new(state: Arc<RwLock<DawUiState>>, daw_panel: Entity<DawPanel>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             state,
             daw_panel,
@@ -137,6 +131,7 @@ impl Render for BrowserFilesPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Render browser through DawPanel
         self.daw_panel.update(cx, |panel, cx| {
+            panel.state.browser_tab = super::daw_ui::state::BrowserTab::Files;
             panel.render_browser(cx).into_any_element()
         })
     }
@@ -167,9 +162,7 @@ pub struct BrowserInstrumentsPanel {
 }
 
 impl BrowserInstrumentsPanel {
-    pub fn new(state: Arc<RwLock<DawUiState>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let daw_panel = cx.new(|cx| DawPanel::new(window, cx));
-        
+    pub fn new(state: Arc<RwLock<DawUiState>>, daw_panel: Entity<DawPanel>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             state,
             daw_panel,
@@ -184,6 +177,7 @@ impl Render for BrowserInstrumentsPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Render browser through DawPanel (all tabs use same browser render)
         self.daw_panel.update(cx, |panel, cx| {
+            panel.state.browser_tab = super::daw_ui::state::BrowserTab::Instruments;
             panel.render_browser(cx).into_any_element()
         })
     }
@@ -213,9 +207,7 @@ pub struct BrowserEffectsPanel {
 }
 
 impl BrowserEffectsPanel {
-    pub fn new(state: Arc<RwLock<DawUiState>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let daw_panel = cx.new(|cx| DawPanel::new(window, cx));
-        
+    pub fn new(state: Arc<RwLock<DawUiState>>, daw_panel: Entity<DawPanel>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             state,
             daw_panel,
@@ -230,6 +222,7 @@ impl Render for BrowserEffectsPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Render browser through DawPanel
         self.daw_panel.update(cx, |panel, cx| {
+            panel.state.browser_tab = super::daw_ui::state::BrowserTab::Effects;
             panel.render_browser(cx).into_any_element()
         })
     }
@@ -259,9 +252,7 @@ pub struct BrowserLoopsPanel {
 }
 
 impl BrowserLoopsPanel {
-    pub fn new(state: Arc<RwLock<DawUiState>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let daw_panel = cx.new(|cx| DawPanel::new(window, cx));
-        
+    pub fn new(state: Arc<RwLock<DawUiState>>, daw_panel: Entity<DawPanel>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             state,
             daw_panel,
@@ -276,6 +267,7 @@ impl Render for BrowserLoopsPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Render browser through DawPanel
         self.daw_panel.update(cx, |panel, cx| {
+            panel.state.browser_tab = super::daw_ui::state::BrowserTab::Loops;
             panel.render_browser(cx).into_any_element()
         })
     }
@@ -305,9 +297,7 @@ pub struct BrowserSamplesPanel {
 }
 
 impl BrowserSamplesPanel {
-    pub fn new(state: Arc<RwLock<DawUiState>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let daw_panel = cx.new(|cx| DawPanel::new(window, cx));
-        
+    pub fn new(state: Arc<RwLock<DawUiState>>, daw_panel: Entity<DawPanel>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {
             state,
             daw_panel,
@@ -322,6 +312,7 @@ impl Render for BrowserSamplesPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Render browser through DawPanel
         self.daw_panel.update(cx, |panel, cx| {
+            panel.state.browser_tab = super::daw_ui::state::BrowserTab::Samples;
             panel.render_browser(cx).into_any_element()
         })
     }

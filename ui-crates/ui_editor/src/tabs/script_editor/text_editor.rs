@@ -296,7 +296,7 @@ impl TextEditor {
 
         // Create subscription for this file
         let analyzer = self.rust_analyzer.clone();
-        println!("📝 Creating change subscription for new file, rust_analyzer present: {}", analyzer.is_some());
+        tracing::info!("📝 Creating change subscription for new file, rust_analyzer present: {}", analyzer.is_some());
         let subscription = cx.subscribe(&input_state, move |this: &mut TextEditor, input_state_entity: Entity<InputState>, event: &InputEvent, cx: &mut Context<TextEditor>| {
             if let InputEvent::Change = event {
                 if let Some(index) = this.open_files.iter().position(|f| f.input_state == input_state_entity) {
@@ -310,19 +310,19 @@ impl TextEditor {
                             let version = file.version;
                             let content = file.input_state.read(cx).value().to_string();
                             
-                            println!("📝 File changed: {:?} (version {}), notifying rust-analyzer", path.file_name(), version);
+                            tracing::info!("📝 File changed: {:?} (version {}), notifying rust-analyzer", path.file_name(), version);
                             analyzer.update(cx, |analyzer, _cx| {
                                 if let Err(e) = analyzer.did_change_file(&path, &content, version) {
-                                    eprintln!("⚠️  Failed to notify rust-analyzer of file change: {}", e);
+                                    tracing::error!("⚠️  Failed to notify rust-analyzer of file change: {}", e);
                                 } else {
                                     if version % 10 == 0 {  // Log every 10th change to avoid spam
-                                        println!("✓ Notified rust-analyzer of change (version {})", version);
+                                        tracing::info!("✓ Notified rust-analyzer of change (version {})", version);
                                     }
                                 }
                             });
                         } else {
                             if file.version == 2 {  // Only log once to avoid spam
-                                println!("⚠️  No rust-analyzer available for didChange");
+                                tracing::info!("⚠️  No rust-analyzer available for didChange");
                             }
                         }
                         
@@ -334,7 +334,7 @@ impl TextEditor {
 
         self.subscriptions.push(subscription);
         
-        println!("✓ Created new file: {:?}", new_path);
+        tracing::info!("✓ Created new file: {:?}", new_path);
         cx.notify();
     }
 
@@ -343,7 +343,7 @@ impl TextEditor {
         // For now, open the current working directory
         // In a real implementation, this would show a platform file picker
         if let Ok(cwd) = std::env::current_dir() {
-            println!("✓ Opening folder: {:?}", cwd);
+            tracing::info!("✓ Opening folder: {:?}", cwd);
             // Emit an event or call a method to open this folder in the file explorer
             cx.emit(TextEditorEvent::OpenFolderRequested(cwd));
         }
@@ -358,7 +358,7 @@ impl TextEditor {
                 file.input_state.update(cx, |state, cx| {
                     // The InputState has a search panel that can be shown
                     // Emit focus event to potentially show search
-                    println!("✓ Opening search panel for current file");
+                    tracing::info!("✓ Opening search panel for current file");
                     cx.emit(ui::input::InputEvent::Focus);
                 });
             }
@@ -372,7 +372,7 @@ impl TextEditor {
             if let Some(file) = self.open_files.get(index) {
                 // Trigger search/replace on the input state
                 file.input_state.update(cx, |state, cx| {
-                    println!("✓ Opening find/replace panel for current file");
+                    tracing::info!("✓ Opening find/replace panel for current file");
                     // The search panel supports replace functionality
                     cx.emit(ui::input::InputEvent::Focus);
                 });
@@ -388,7 +388,7 @@ impl TextEditor {
                 let path = file.path.clone();
                 let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                 
-                println!("🚀 Running file: {:?}", path);
+                tracing::info!("🚀 Running file: {:?}", path);
                 
                 // Determine how to run based on file extension
                 let command = match extension {
@@ -397,7 +397,7 @@ impl TextEditor {
                     "js" | "ts" => format!("node {}", path.display()),
                     "sh" => format!("bash {}", path.display()),
                     _ => {
-                        println!("⚠️  Don't know how to run .{} files", extension);
+                        tracing::info!("⚠️  Don't know how to run .{} files", extension);
                         cx.emit(TextEditorEvent::RunScriptRequested(path, "unknown".to_string()));
                         return;
                     }
@@ -414,7 +414,7 @@ impl TextEditor {
         if let Some(index) = self.current_file_index {
             if let Some(file) = self.open_files.get(index) {
                 let path = file.path.clone();
-                println!("🐛 Debugging file: {:?}", path);
+                tracing::info!("🐛 Debugging file: {:?}", path);
                 cx.emit(TextEditorEvent::DebugScriptRequested(path));
             }
         }
@@ -434,7 +434,7 @@ impl TextEditor {
         let content = match fs::read_to_string(&path) {
             Ok(content) => {
                 let read_time = read_start.elapsed();
-                println!(
+                tracing::info!(
                     "✓ Read file {:?} - {} bytes in {:.2}ms", 
                     path.file_name().unwrap_or_default(),
                     content.len(),
@@ -443,7 +443,7 @@ impl TextEditor {
                 content
             }
             Err(err) => {
-                eprintln!("✗ Failed to read file: {:?}, error: {}", path, err);
+                tracing::error!("✗ Failed to read file: {:?}, error: {}", path, err);
                 return;
             }
         };
@@ -460,7 +460,7 @@ impl TextEditor {
             .map(|ext| ext == "md")
             .unwrap_or(false);
         
-        println!(
+        tracing::info!(
             "📄 Opening file: {} lines, {} KB, language: {}{}",
             lines_count,
             file_size / 1024,
@@ -470,19 +470,19 @@ impl TextEditor {
         
         // Warn user about very large files
         if lines_count > 50_000 {
-            println!(
+            tracing::info!(
                 "⚠️  Large file detected ({} lines). Some features may be disabled for performance:",
                 lines_count
             );
-            println!("   - Syntax highlighting disabled");
-            println!("   - Soft wrap disabled");
+            tracing::info!("   - Syntax highlighting disabled");
+            tracing::info!("   - Soft wrap disabled");
         } else if lines_count > 10_000 {
-            println!(
+            tracing::info!(
                 "ℹ️  Large file ({} lines). Performance optimizations enabled:",
                 lines_count
             );
-            println!("   - Soft wrap disabled");
-            println!("   - Virtual scrolling enabled");
+            tracing::info!("   - Soft wrap disabled");
+            tracing::info!("   - Virtual scrolling enabled");
         }
 
         // Create editor state with optimal settings for large files
@@ -498,7 +498,8 @@ impl TextEditor {
                 })
                 // Disable soft wrap for large files for better performance
                 // Files with more than 5k lines or 500KB get no wrapping
-                .soft_wrap(lines_count < 5_000 && file_size < 500_000);
+                .soft_wrap(lines_count < 5_000 && file_size < 500_000)
+                .soft_wrap(false);
 
             // Set the content after creating the state
             state.set_value(&content, window, cx);
@@ -519,11 +520,11 @@ impl TextEditor {
                 );
             });
         } else {
-            println!("⚠️  rust-analyzer not available, completions will be limited");
+            tracing::info!("⚠️  rust-analyzer not available, completions will be limited");
         }
 
         let setup_time = setup_start.elapsed();
-        println!(
+        tracing::info!(
             "⚡ Editor setup completed in {:.2}ms",
             setup_time.as_secs_f64() * 1000.0
         );
@@ -550,7 +551,7 @@ impl TextEditor {
         
         // Create subscription for this file
         let analyzer = self.rust_analyzer.clone();
-        println!("📝 Creating change subscription for {:?}, rust_analyzer present: {}", path.file_name(), analyzer.is_some());
+        tracing::info!("📝 Creating change subscription for {:?}, rust_analyzer present: {}", path.file_name(), analyzer.is_some());
         let subscription = cx.subscribe(&input_state, move |this: &mut TextEditor, input_state_entity: Entity<InputState>, event: &InputEvent, cx: &mut Context<TextEditor>| {
             match event {
                 InputEvent::Change => {
@@ -569,19 +570,19 @@ impl TextEditor {
                                 let version = file.version;
                                 let content = file.input_state.read(cx).value().to_string();
                                 
-                                println!("📝 File changed: {:?} (version {}), notifying rust-analyzer", path.file_name(), version);
+                                tracing::info!("📝 File changed: {:?} (version {}), notifying rust-analyzer", path.file_name(), version);
                                 analyzer.update(cx, |analyzer, _cx| {
                                     if let Err(e) = analyzer.did_change_file(&path, &content, version) {
-                                        eprintln!("⚠️  Failed to notify rust-analyzer of file change: {}", e);
+                                        tracing::error!("⚠️  Failed to notify rust-analyzer of file change: {}", e);
                                     } else {
                                         if version % 10 == 0 {  // Log every 10th change to avoid spam
-                                            println!("✓ Notified rust-analyzer of change (version {})", version);
+                                            tracing::info!("✓ Notified rust-analyzer of change (version {})", version);
                                         }
                                     }
                                 });
                             } else {
                                 if file.version == 2 {  // Only log once to avoid spam
-                                    println!("⚠️  No rust-analyzer available for didChange");
+                                    tracing::info!("⚠️  No rust-analyzer available for didChange");
                                 }
                             }
                             
@@ -592,7 +593,7 @@ impl TextEditor {
                 InputEvent::GoToDefinition { path, line, character } => {
                     // Navigate to the definition - emit an event so it can be handled 
                     // by the parent where we have window access
-                    println!("🎯 Received GoToDefinition event: {:?} at {}:{}", path, line, character);
+                    tracing::info!("🎯 Received GoToDefinition event: {:?} at {}:{}", path, line, character);
                     
                     // Emit the navigation event so it can be handled by parent components
                     // that have window access
@@ -621,16 +622,16 @@ impl TextEditor {
         if let Some(index) = self.current_file_index {
             if let Some(file) = self.open_files.get(index) {
                 let state = file.input_state.read(cx);
-                println!(
+                tracing::info!(
                     "📊 Line cache initialized - capacity: {} lines",
                     state.line_cache().len()
                 );
                 
                 // Log autocomplete configuration
                 if state.lsp.completion_provider.is_some() {
-                    println!("✓ Autocomplete enabled with comprehensive provider");
+                    tracing::info!("✓ Autocomplete enabled with comprehensive provider");
                 } else {
-                    println!("ℹ️  No autocomplete provider configured");
+                    tracing::info!("ℹ️  No autocomplete provider configured");
                 }
             }
         }
@@ -732,7 +733,7 @@ impl TextEditor {
                 // Write to file
                 if let Ok(_) = fs::write(&open_file.path, content.as_str()) {
                     open_file.is_modified = false;
-                    println!("💾 File saved: {:?}", open_file.path);
+                    tracing::info!("💾 File saved: {:?}", open_file.path);
                     
                     // Emit event so rust-analyzer can be notified
                     cx.emit(TextEditorEvent::FileSaved {
@@ -758,7 +759,7 @@ impl TextEditor {
                     path: path.clone(),
                 });
                 
-                println!("❌ File closed: {:?}", path.file_name());
+                tracing::info!("❌ File closed: {:?}", path.file_name());
                 
                 // Remove the file from open files
                 self.open_files.remove(index);
@@ -797,7 +798,7 @@ impl TextEditor {
                         cx,
                     );
                     
-                    println!("📍 Navigated to line {}, column {}", line, column);
+                    tracing::info!("📍 Navigated to line {}, column {}", line, column);
                     
                     // Force an additional notify to ensure scroll is processed
                     cx.notify();
@@ -839,7 +840,7 @@ impl TextEditor {
     /// Process pending navigation request (called from render where we have window access)
     fn process_pending_navigation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some((path, line, character)) = self.pending_navigation.take() {
-            println!("🎯 Processing pending navigation to {:?} at {}:{}", path, line, character);
+            tracing::info!("🎯 Processing pending navigation to {:?} at {}:{}", path, line, character);
             
             // Check if file is already open
             let file_index = self.open_files.iter().position(|f| f.path == path);
@@ -847,12 +848,12 @@ impl TextEditor {
             if let Some(index) = file_index {
                 // File is already open, switch to it
                 self.current_file_index = Some(index);
-                println!("✓ Switched to already-open file {:?}", path);
+                tracing::info!("✓ Switched to already-open file {:?}", path);
             } else {
                 // Need to open the file first
-                println!("📂 Opening file {:?}", path);
+                tracing::info!("📂 Opening file {:?}", path);
                 self.open_file(path.clone(), window, cx);
-                println!("✓ File opened, current_file_index: {:?}", self.current_file_index);
+                tracing::info!("✓ File opened, current_file_index: {:?}", self.current_file_index);
             }
             
             // Now navigate to the specific position
@@ -861,7 +862,7 @@ impl TextEditor {
             let target_line = (line + 1) as usize;  // Convert 0-based to 1-based
             let target_col = (character + 1) as usize;  // Convert 0-based to 1-based
             
-            println!("🎯 Calling go_to_line with line {} (LSP: {}), column {} (LSP: {})", 
+            tracing::info!("🎯 Calling go_to_line with line {} (LSP: {}), column {} (LSP: {})", 
                 target_line, line, target_col, character);
             
             self.go_to_line(target_line, target_col, window, cx);
@@ -877,7 +878,7 @@ impl TextEditor {
                 if let Some((line, column)) = open_file.pending_scroll_target {
                     // Try to scroll - if layout isn't ready, set_cursor_position will handle it gracefully
                     // We'll keep trying on subsequent frames until it works
-                    println!("📜 Attempting to scroll to line {}, column {}", line, column);
+                    tracing::info!("📜 Attempting to scroll to line {}, column {}", line, column);
                     
                     let scroll_attempted = open_file.input_state.update(cx, |state, cx| {
                         use ui::input::Position;
@@ -897,7 +898,7 @@ impl TextEditor {
                         // Clear the pending scroll target - even if it didn't fully work,
                         // set_cursor_position was called which should set deferred scroll
                         open_file.pending_scroll_target = None;
-                        println!("✓ Scroll target cleared");
+                        tracing::info!("✓ Scroll target cleared");
                     }
                 }
             }
@@ -1590,7 +1591,7 @@ impl Render for TextEditor {
         if self.show_performance_stats {
             let render_time = render_start.elapsed();
             if render_time.as_millis() > 16 {
-                eprintln!(
+                tracing::error!(
                     "⚠️  Slow render: {:.2}ms (target: 16ms for 60 FPS)",
                     render_time.as_secs_f64() * 1000.0
                 );

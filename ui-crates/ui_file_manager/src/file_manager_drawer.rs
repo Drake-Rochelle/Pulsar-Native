@@ -7,6 +7,7 @@ use ui::{
     h_flex, v_flex,
     input::{InputState, TextInput},
     resizable::{h_resizable, resizable_panel, ResizableState},
+    menu::context_menu::ContextMenuExt,
     ActiveTheme as _, Icon, IconName, StyledExt,
 };
 
@@ -17,6 +18,7 @@ use crate::drawer::{
     tree::FolderNode,
     operations::FileOperations,
     utils::*,
+    context_menus,
 };
 
 // ============================================================================
@@ -44,6 +46,9 @@ pub struct FileManagerDrawer {
 
     // Rename state
     renaming_item: Option<PathBuf>,
+
+    // Cached registered file types from plugin system
+    registered_file_types: Vec<plugin_editor_api::FileTypeDefinition>,
     rename_input_state: Entity<InputState>,
 
     // Search
@@ -120,6 +125,7 @@ impl FileManagerDrawer {
             file_filter_state,
             show_hidden_files: false,
             clipboard: None,
+            registered_file_types: Vec::new(), // Will be populated from plugin manager
         }
     }
 
@@ -127,17 +133,232 @@ impl FileManagerDrawer {
         Self::new(project_path, window, cx)
     }
 
+    /// Update registered file types from the plugin manager
+    pub fn update_file_types(&mut self, file_types: Vec<plugin_editor_api::FileTypeDefinition>) {
+        self.registered_file_types = file_types;
+    }
+
+    // ========================================================================
+    // ACTION HANDLERS
+    // ========================================================================
+
+    fn handle_create_asset(&mut self, action: &CreateAsset, cx: &mut Context<Self>) {
+        if let Some(folder) = &self.selected_folder {
+            // Create file name with extension
+            let file_name = format!("New{}.{}", action.display_name.replace(" ", ""), action.extension);
+            let file_path = folder.join(&file_name);
+
+            // Check if file already exists and generate unique name
+            let mut counter = 1;
+            let mut final_path = file_path.clone();
+            while final_path.exists() {
+                let file_name = format!("New{}_{}.{}", action.display_name.replace(" ", ""), counter, action.extension);
+                final_path = folder.join(&file_name);
+                counter += 1;
+            }
+
+            // Create the file with default content (empty for now, can be enhanced with plugin default_content)
+            if let Err(e) = std::fs::write(&final_path, "") {
+                eprintln!("Failed to create file {:?}: {}", final_path, e);
+            } else {
+                // Refresh the folder tree
+                if let Some(ref path) = self.project_path {
+                    self.folder_tree = FolderNode::from_path(path);
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    fn handle_new_folder(&mut self, _action: &NewFolder, cx: &mut Context<Self>) {
+        if let Some(folder) = &self.selected_folder {
+            // Create folder with unique name
+            let mut counter = 1;
+            let mut folder_name = "NewFolder".to_string();
+            let mut folder_path = folder.join(&folder_name);
+
+            while folder_path.exists() {
+                folder_name = format!("NewFolder_{}", counter);
+                folder_path = folder.join(&folder_name);
+                counter += 1;
+            }
+
+            // Create the folder
+            if let Err(e) = std::fs::create_dir(&folder_path) {
+                eprintln!("Failed to create folder {:?}: {}", folder_path, e);
+            } else {
+                // Refresh the folder tree
+                if let Some(ref path) = self.project_path {
+                    self.folder_tree = FolderNode::from_path(path);
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    fn handle_delete_item(&mut self, cx: &mut Context<Self>) {
+        let items_to_delete: Vec<PathBuf> = self.selected_items.iter().cloned().collect();
+
+        for item in items_to_delete {
+            if item.is_dir() {
+                if let Err(e) = std::fs::remove_dir_all(&item) {
+                    eprintln!("Failed to delete folder {:?}: {}", item, e);
+                }
+            } else {
+                if let Err(e) = std::fs::remove_file(&item) {
+                    eprintln!("Failed to delete file {:?}: {}", item, e);
+                }
+            }
+        }
+
+        self.selected_items.clear();
+
+        // Refresh the folder tree
+        if let Some(ref path) = self.project_path {
+            self.folder_tree = FolderNode::from_path(path);
+        }
+
+        cx.notify();
+    }
+
+    fn handle_rename_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Get the first selected item
+        if let Some(item) = self.selected_items.iter().next() {
+            self.renaming_item = Some(item.clone());
+
+            // Set the rename input to the current name
+            if let Some(name) = item.file_name() {
+                self.rename_input_state.update(cx, |input, cx| {
+                    input.replace_text_in_range(None, &name.to_string_lossy(), window, cx);
+                });
+            }
+
+            cx.notify();
+        }
+    }
+
+    fn handle_duplicate_item(&mut self, cx: &mut Context<Self>) {
+        let items_to_duplicate: Vec<PathBuf> = self.selected_items.iter().cloned().collect();
+
+        for item in items_to_duplicate {
+            if let Some(parent) = item.parent() {
+                if let Some(name) = item.file_name() {
+                    let name_str = name.to_string_lossy();
+
+                    // Generate unique name
+                    let mut counter = 1;
+                    let mut new_name = format!("{}_copy", name_str);
+                    let mut new_path = parent.join(&new_name);
+
+                    while new_path.exists() {
+                        new_name = format!("{}_copy_{}", name_str, counter);
+                        new_path = parent.join(&new_name);
+                        counter += 1;
+                    }
+
+                    // Copy the item
+                    if item.is_dir() {
+                        if let Err(e) = Self::copy_dir_recursive(&item, &new_path) {
+                            eprintln!("Failed to duplicate folder {:?}: {}", item, e);
+                        }
+                    } else {
+                        if let Err(e) = std::fs::copy(&item, &new_path) {
+                            eprintln!("Failed to duplicate file {:?}: {}", item, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Refresh the folder tree
+        if let Some(ref path) = self.project_path {
+            self.folder_tree = FolderNode::from_path(path);
+        }
+
+        cx.notify();
+    }
+
+    fn handle_copy(&mut self, _cx: &mut Context<Self>) {
+        let items: Vec<PathBuf> = self.selected_items.iter().cloned().collect();
+        self.clipboard = Some((items, false));
+    }
+
+    fn handle_cut(&mut self, _cx: &mut Context<Self>) {
+        let items: Vec<PathBuf> = self.selected_items.iter().cloned().collect();
+        self.clipboard = Some((items, true));
+    }
+
+    fn handle_paste(&mut self, cx: &mut Context<Self>) {
+        if let Some((items, is_cut)) = &self.clipboard {
+            if let Some(target_folder) = &self.selected_folder {
+                for item in items.iter() {
+                    if let Some(name) = item.file_name() {
+                        let target_path = target_folder.join(name);
+
+                        if *is_cut {
+                            // Move operation
+                            if let Err(e) = std::fs::rename(item, &target_path) {
+                                eprintln!("Failed to move {:?} to {:?}: {}", item, target_path, e);
+                            }
+                        } else {
+                            // Copy operation
+                            if item.is_dir() {
+                                if let Err(e) = Self::copy_dir_recursive(item, &target_path) {
+                                    eprintln!("Failed to copy folder {:?}: {}", item, e);
+                                }
+                            } else {
+                                if let Err(e) = std::fs::copy(item, &target_path) {
+                                    eprintln!("Failed to copy file {:?}: {}", item, e);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Clear clipboard if it was a cut operation
+                if *is_cut {
+                    self.clipboard = None;
+                }
+
+                // Refresh the folder tree
+                if let Some(ref path) = self.project_path {
+                    self.folder_tree = FolderNode::from_path(path);
+                }
+
+                cx.notify();
+            }
+        }
+    }
+
+    fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+
+            if src_path.is_dir() {
+                Self::copy_dir_recursive(&src_path, &dst_path)?;
+            } else {
+                std::fs::copy(&src_path, &dst_path)?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn set_project_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        println!("[FILE_MANAGER] set_project_path called with: {:?}", path);
-        println!("[FILE_MANAGER] Path exists: {}", path.exists());
-        println!("[FILE_MANAGER] Path is_dir: {}", path.is_dir());
-        
+        tracing::info!("[FILE_MANAGER] set_project_path called with: {:?}", path);
+        tracing::info!("[FILE_MANAGER] Path exists: {}", path.exists());
+        tracing::info!("[FILE_MANAGER] Path is_dir: {}", path.is_dir());
+
         self.project_path = Some(path.clone());
         self.folder_tree = FolderNode::from_path(&path);
         self.selected_folder = Some(path.clone());
-        
-        println!("[FILE_MANAGER] folder_tree is_some: {}", self.folder_tree.is_some());
-        println!("[FILE_MANAGER] selected_folder: {:?}", self.selected_folder);
+
+        tracing::info!("[FILE_MANAGER] folder_tree is_some: {}", self.folder_tree.is_some());
+        tracing::info!("[FILE_MANAGER] selected_folder: {:?}", self.selected_folder);
         
         cx.notify();
     }
@@ -284,6 +505,9 @@ impl FileManagerDrawer {
 
     fn render_file_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let items = self.get_filtered_items();
+        let has_clipboard = self.clipboard.is_some();
+        let selected_folder = self.selected_folder.clone();
+        let file_types = self.registered_file_types.clone();
 
         v_flex()
             .size_full()
@@ -299,6 +523,14 @@ impl FileManagerDrawer {
                     .flex_1()
                     .p_4()
                     .overflow_y_scroll()
+                    .context_menu(move |menu, _window, _cx| {
+                        // Show folder context menu for blank area
+                        if let Some(path) = selected_folder.clone() {
+                            context_menus::folder_context_menu(path, has_clipboard, file_types.clone())(menu, _window, _cx)
+                        } else {
+                            menu
+                        }
+                    })
                     .child(
                         match self.view_mode {
                             ViewMode::Grid => self.render_grid_view(&items, window, cx).into_any_element(),
@@ -322,8 +554,14 @@ impl FileManagerDrawer {
         let icon = get_icon_for_file_type(&item.file_type);
         let icon_color = get_icon_color_for_file_type(&item.file_type, cx.theme());
         let item_clone = item.clone();
+        let item_clone2 = item.clone();
+        let item_path = item.path.clone();
+        let has_clipboard = self.clipboard.is_some();
+        let is_class = item.file_type == FileType::Class;
+        let is_folder = item.is_folder;
 
         h_flex()
+            .id(SharedString::from(format!("list-item-{}", item.name)))
             .w_full()
             .h(px(32.))
             .px_3()
@@ -361,6 +599,22 @@ impl FileManagerDrawer {
             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |drawer, event: &MouseDownEvent, _window: &mut Window, cx| {
                 drawer.handle_item_click(&item_clone, &event.modifiers, cx);
             }))
+            .on_mouse_down(gpui::MouseButton::Right, cx.listener(move |drawer, event: &MouseDownEvent, _window: &mut Window, cx| {
+                // Select item on right-click if not already selected (without changing folder view)
+                if !drawer.selected_items.contains(&item_clone2.path) {
+                    drawer.selected_items.clear();
+                    drawer.selected_items.insert(item_clone2.path.clone());
+                    // Don't change selected_folder on right-click to avoid navigating
+                    cx.notify();
+                }
+                // Stop propagation so parent container's context menu doesn't show
+                cx.stop_propagation();
+            }))
+            .context_menu(move |menu, _window, _cx| {
+                // All items (files and folders) use item_context_menu
+                // Only blank area uses folder_context_menu with "New" options
+                context_menus::item_context_menu(item_path.clone(), has_clipboard, is_class)(menu, _window, _cx)
+            })
     }
 
     fn render_combined_toolbar(&mut self, items: &[FileItem], window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -615,6 +869,11 @@ impl FileManagerDrawer {
         let icon = get_icon_for_file_type(&item.file_type);
         let icon_color = get_icon_color_for_file_type(&item.file_type, cx.theme());
         let item_clone = item.clone();
+        let item_clone2 = item.clone();
+        let item_path = item.path.clone();
+        let has_clipboard = self.clipboard.is_some();
+        let is_class = item.file_type == FileType::Class;
+        let is_folder = item.is_folder;
 
         div()
             .w(px(100.0))
@@ -638,6 +897,7 @@ impl FileManagerDrawer {
             })
             .child(
                 v_flex()
+                    .id(SharedString::from(format!("grid-item-{}", item.name)))
                     .w_full()
                     .h_full()
                     .p_3()
@@ -681,10 +941,26 @@ impl FileManagerDrawer {
                                 .into_any_element()
                         }
                     )
+                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |drawer, event: &MouseDownEvent, _window: &mut Window, cx| {
+                        drawer.handle_item_click(&item_clone, &event.modifiers, cx);
+                    }))
+                    .on_mouse_down(gpui::MouseButton::Right, cx.listener(move |drawer, event: &MouseDownEvent, _window: &mut Window, cx| {
+                        // Select item on right-click if not already selected (without changing folder view)
+                        if !drawer.selected_items.contains(&item_clone2.path) {
+                            drawer.selected_items.clear();
+                            drawer.selected_items.insert(item_clone2.path.clone());
+                            // Don't change selected_folder on right-click to avoid navigating
+                            cx.notify();
+                        }
+                        // Stop propagation so parent container's context menu doesn't show
+                        cx.stop_propagation();
+                    }))
+                    .context_menu(move |menu, _window, _cx| {
+                        // All items (files and folders) use item_context_menu
+                        // Only blank area uses folder_context_menu with "New" options
+                        context_menus::item_context_menu(item_path.clone(), has_clipboard, is_class)(menu, _window, _cx)
+                    })
             )
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |drawer, event: &MouseDownEvent, _window: &mut Window, cx| {
-                drawer.handle_item_click(&item_clone, &event.modifiers, cx);
-            }))
     }
 
     fn handle_item_click(&mut self, item: &FileItem, modifiers: &Modifiers, cx: &mut Context<Self>) {
@@ -871,6 +1147,30 @@ impl Render for FileManagerDrawer {
                     this.folder_tree = FolderNode::from_path(path);
                 }
                 cx.notify();
+            }))
+            .on_action(cx.listener(|this, action: &CreateAsset, _window, cx| {
+                this.handle_create_asset(action, cx);
+            }))
+            .on_action(cx.listener(|this, action: &NewFolder, _window, cx| {
+                this.handle_new_folder(action, cx);
+            }))
+            .on_action(cx.listener(|this, _action: &DeleteItem, _window, cx| {
+                this.handle_delete_item(cx);
+            }))
+            .on_action(cx.listener(|this, _action: &RenameItem, window, cx| {
+                this.handle_rename_item(window, cx);
+            }))
+            .on_action(cx.listener(|this, _action: &DuplicateItem, _window, cx| {
+                this.handle_duplicate_item(cx);
+            }))
+            .on_action(cx.listener(|this, _action: &Copy, _window, cx| {
+                this.handle_copy(cx);
+            }))
+            .on_action(cx.listener(|this, _action: &Cut, _window, cx| {
+                this.handle_cut(cx);
+            }))
+            .on_action(cx.listener(|this, _action: &Paste, _window, cx| {
+                this.handle_paste(cx);
             }))
             .child(self.render_content(window, cx))
     }

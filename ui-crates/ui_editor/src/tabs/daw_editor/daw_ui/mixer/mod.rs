@@ -20,13 +20,12 @@ pub mod insert_slots;
 pub mod master_channel;
 pub mod meter_bar;
 pub mod output_routing;
+pub mod pan_control;
 pub mod peak_meters;
 pub mod send_controls;
 pub mod send_row;
 pub mod master_meters;
 pub mod master_fader;
-
-
 
 pub const CHANNEL_STRIP_WIDTH: f32 = 90.0;
 pub const MIXER_PADDING: f32 = 8.0;
@@ -55,6 +54,7 @@ pub fn render_mixer(state: &mut DawUiState, cx: &mut Context<DawPanel>) -> impl 
         .h_full()
         .relative()
         .overflow_hidden()
+        .bg(cx.theme().background)
         .child(
             h_virtual_list(
                 panel_entity.clone(),

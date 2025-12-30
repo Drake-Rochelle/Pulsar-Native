@@ -2,52 +2,81 @@
 
 use gpui::*;
 use ui::{ActiveTheme, StyledExt, dock::{Panel, PanelEvent}, v_flex, input::{TextInput, InputState}};
-use super::ui::{SceneBrowser, HierarchyPanel, PropertiesPanel, ViewportPanel, LevelEditorState};
+use super::ui::{WorldSettings, HierarchyPanel, PropertiesPanel, ViewportPanel, LevelEditorState};
 use std::sync::Arc;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::HashSet;
 use engine_backend::services::gpu_renderer::GpuRenderer;
 use engine_backend::GameThread;
 
-/// Scene Browser Panel
-pub struct SceneBrowserPanel {
-    scene_browser: SceneBrowser,
+/// World Settings Panel (replaced Scene Browser)
+pub struct WorldSettingsPanel {
+    world_settings: WorldSettings,
+    state: Arc<parking_lot::RwLock<LevelEditorState>>,
     focus_handle: FocusHandle,
+    /// Tracks which sections are collapsed (by section name)
+    collapsed_sections: HashSet<String>,
 }
 
-impl SceneBrowserPanel {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+impl WorldSettingsPanel {
+    pub fn new(state: Arc<parking_lot::RwLock<LevelEditorState>>, cx: &mut Context<Self>) -> Self {
+        // Default all sections to collapsed
+        let mut collapsed_sections = HashSet::new();
+        collapsed_sections.insert("Environment".to_string());
+        collapsed_sections.insert("Global Illumination".to_string());
+        collapsed_sections.insert("Fog & Atmosphere".to_string());
+        collapsed_sections.insert("Physics".to_string());
+        collapsed_sections.insert("Audio".to_string());
+        
         Self {
-            scene_browser: SceneBrowser::new(),
+            world_settings: WorldSettings::new(),
+            state,
             focus_handle: cx.focus_handle(),
+            collapsed_sections,
         }
+    }
+
+    pub fn toggle_section(&mut self, section: String, cx: &mut Context<Self>) {
+        if self.collapsed_sections.contains(&section) {
+            self.collapsed_sections.remove(&section);
+        } else {
+            self.collapsed_sections.insert(section);
+        }
+        cx.notify();
+    }
+
+    pub fn is_section_collapsed(&self, section: &str) -> bool {
+        self.collapsed_sections.contains(section)
     }
 }
 
-impl EventEmitter<PanelEvent> for SceneBrowserPanel {}
+impl EventEmitter<PanelEvent> for WorldSettingsPanel {}
 
-impl Render for SceneBrowserPanel {
+impl Render for WorldSettingsPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let state = self.state.read();
+        let collapsed_sections = self.collapsed_sections.clone();
         v_flex()
             .size_full()
             .bg(cx.theme().sidebar)
-            .child(self.scene_browser.render(cx))
+            .child(self.world_settings.render(&*state, self.state.clone(), &collapsed_sections, cx))
     }
 }
 
-impl Focusable for SceneBrowserPanel {
+impl Focusable for WorldSettingsPanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Panel for SceneBrowserPanel {
+impl Panel for WorldSettingsPanel {
     fn panel_name(&self) -> &'static str {
-        "scene_browser"
+        "world_settings"
     }
 
     fn title(&self, _window: &Window, _cx: &App) -> AnyElement {
-        "Scenes".into_any_element()
+        "World".into_any_element()
     }
 }
 
@@ -105,26 +134,57 @@ pub struct PropertiesPanelWrapper {
     // Input state for property editing
     editing_property: Option<String>,
     property_input: Entity<InputState>,
+    /// Tracks which sections are collapsed (by section name)
+    collapsed_sections: HashSet<String>,
 }
 
 impl PropertiesPanelWrapper {
     pub fn new(state: Arc<parking_lot::RwLock<LevelEditorState>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let property_input = cx.new(|cx| InputState::new(window, cx));
+        // Default all sections to collapsed except Transform (the top section)
+        let mut collapsed_sections = HashSet::new();
+        collapsed_sections.insert("Camera Settings".to_string());
+        collapsed_sections.insert("Light Settings".to_string());
+        collapsed_sections.insert("Mesh Settings".to_string());
+        collapsed_sections.insert("Folder Settings".to_string());
+        collapsed_sections.insert("Empty Object".to_string());
+        collapsed_sections.insert("Particle System".to_string());
+        collapsed_sections.insert("Audio Source".to_string());
+        collapsed_sections.insert("Tags & Layers".to_string());
+        collapsed_sections.insert("Components".to_string());
+        collapsed_sections.insert("Rendering".to_string());
+        collapsed_sections.insert("Physics".to_string());
+        
         Self {
             properties: PropertiesPanel::new(),
             state,
             focus_handle: cx.focus_handle(),
             editing_property: None,
             property_input,
+            collapsed_sections,
         }
     }
 
-    fn start_editing_property(&mut self, property_path: String, current_value: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn toggle_section(&mut self, section: String, cx: &mut Context<Self>) {
+        if self.collapsed_sections.contains(&section) {
+            self.collapsed_sections.remove(&section);
+        } else {
+            self.collapsed_sections.insert(section);
+        }
+        cx.notify();
+    }
+
+    pub fn is_section_collapsed(&self, section: &str) -> bool {
+        self.collapsed_sections.contains(section)
+    }
+
+    pub fn start_editing(&mut self, property_path: String, current_value: String, window: &mut Window, cx: &mut Context<Self>) {
         self.editing_property = Some(property_path);
         self.property_input.update(cx, |input, cx| {
             input.set_value(&current_value, window, cx);
             input.focus(window, cx);
         });
+        cx.notify();
     }
 
     fn commit_property_edit(&mut self, cx: &mut Context<Self>) {
@@ -136,10 +196,12 @@ impl PropertiesPanelWrapper {
                 self.update_transform_property(&property_path, value);
             }
         }
+        cx.notify();
     }
 
-    fn cancel_property_edit(&mut self, _cx: &mut Context<Self>) {
+    fn cancel_property_edit(&mut self, cx: &mut Context<Self>) {
         self.editing_property = None;
+        cx.notify();
     }
 
     fn update_transform_property(&self, property_path: &str, value: f32) {
@@ -173,19 +235,7 @@ impl EventEmitter<PanelEvent> for PropertiesPanelWrapper {}
 impl Render for PropertiesPanelWrapper {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read();
-
-        // Store editing trigger in a channel-like pattern
-        let editing_trigger = std::rc::Rc::new(std::cell::RefCell::new(None::<(String, String)>));
-        let editing_trigger_clone = editing_trigger.clone();
-
-        // Check if editing was triggered and update state
-        if let Some((path, value)) = editing_trigger.borrow_mut().take() {
-            self.property_input.update(cx, |input, cx| {
-                input.set_value(&value, window, cx);
-                input.focus(window, cx);
-            });
-            self.editing_property = Some(path);
-        }
+        let collapsed_sections = self.collapsed_sections.clone();
 
         v_flex()
             .size_full()
@@ -195,9 +245,8 @@ impl Render for PropertiesPanelWrapper {
                 self.state.clone(),
                 &self.editing_property,
                 &self.property_input,
-                move |path: String, value: String| {
-                    *editing_trigger_clone.borrow_mut() = Some((path, value));
-                },
+                &collapsed_sections,
+                window,
                 cx
             ))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {

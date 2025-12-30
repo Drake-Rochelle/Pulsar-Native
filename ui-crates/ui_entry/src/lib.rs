@@ -3,15 +3,17 @@
 //! Project selection and startup screens
 
 pub mod entry_screen;
-pub mod loading_window;
+pub mod oobe;
+//pub mod loading_window;
 pub mod window;
 pub mod dependency_setup_window;
 
 // Re-export main types
 pub use window::EntryWindow;
-pub use loading_window::{LoadingWindow, LoadingComplete};
+//pub use loading_window::{LoadingWindow, LoadingComplete};
 pub use entry_screen::{EntryScreen, project_selector::ProjectSelected};
 pub use dependency_setup_window::{DependencySetupWindow, SetupComplete};
+pub use oobe::{IntroScreen, IntroComplete, has_seen_intro, mark_intro_seen, reset_intro};
 
 // Re-export engine types that UI needs
 pub use engine_state::{EngineState, WindowRequest};
@@ -49,14 +51,46 @@ pub fn create_entry_component(
         0
     };
     
+    // Check if we should show OOBE intro first
+    let seen_intro = has_seen_intro();
+    tracing::info!("🎯 [ENTRY] has_seen_intro() = {}", seen_intro);
+    
+    if !seen_intro {
+        tracing::info!("🎉 [OOBE] Showing intro screen for first-time user");
+        
+        // Create the intro screen
+        let intro_screen = cx.new(|cx| IntroScreen::new(window, cx));
+        
+        // Subscribe to intro completion - will switch to entry screen
+        let engine_state_clone = engine_state.clone();
+        cx.subscribe(&intro_screen, move |_view: Entity<IntroScreen>, _event: &IntroComplete, cx: &mut App| {
+            tracing::info!("🎉 [OOBE] Intro complete, marking as seen");
+            mark_intro_seen();
+            
+            // Request a new entry window to replace this one
+            engine_state_clone.request_window(WindowRequest::Entry);
+            
+            // Close the current window
+            if window_id != 0 {
+                tracing::info!("🗑️ Closing OOBE window {}", window_id);
+                engine_state_clone.request_window(WindowRequest::CloseWindow {
+                    window_id,
+                });
+            }
+        }).detach();
+        
+        return cx.new(|cx| Root::new(intro_screen.clone().into(), window, cx));
+    }
+    
+    tracing::info!("🎯 [ENTRY] Showing entry screen (intro already seen)");
     let entry_screen = cx.new(|cx| EntryScreen::new(window, cx));
     
     // Subscribe to ProjectSelected event - open loading window and close entry window
     let engine_state_clone = engine_state.clone();
     cx.subscribe(&entry_screen, move |_view: Entity<EntryScreen>, event: &ProjectSelected, _cx: &mut App| {
-        println!("🎯 [ENTRY] Project selected: {:?}", event.path);
-        println!("🎯 [ENTRY] Path exists: {}", event.path.exists());
-        println!("🎯 [ENTRY] Path is_dir: {}", event.path.is_dir());
+        tracing::info!("🎯 [ENTRY] Project selected: {:?}", event.path);
+        tracing::info!("🎯 [ENTRY] Path exists: {}", event.path.exists());
+        tracing::info!("🎯 [ENTRY] Path is_dir: {}", event.path.is_dir());
         
         // Request loading/splash window
         engine_state_clone.request_window(WindowRequest::ProjectSplash {
@@ -65,7 +99,7 @@ pub fn create_entry_component(
         
         // Close the entry window
         if window_id != 0 {
-            println!("🗑️ Closing entry window {}", window_id);
+            tracing::info!("🗑️ Closing entry window {}", window_id);
             engine_state_clone.request_window(WindowRequest::CloseWindow {
                 window_id,
             });
