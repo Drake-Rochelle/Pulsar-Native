@@ -128,6 +128,7 @@ impl WinitGpuiApp {
     }
 
     // TODO: Refactor window creation into a trait based system for modular window types
+    //       This will be especially useful as more window types are added via plugins.
     /// Create a new window based on a request
     ///
     /// # Arguments
@@ -139,14 +140,14 @@ impl WinitGpuiApp {
         let (title, size) = match &request {
             WindowRequest::Entry => ("Pulsar Engine", (1280.0, 720.0)),
             WindowRequest::Settings => ("Settings", (800.0, 600.0)),
-            WindowRequest::About => ("About Pulsar Engine", (600.0, 500.0)),
+            WindowRequest::About => ("About Pulsar Engine", (600.0, 900.0)),
             WindowRequest::Documentation => ("Documentation", (1400.0, 900.0)),
-            WindowRequest::ProjectEditor { .. } => ("Pulsar Engine - Project Editor", (1280.0, 800.0)),
+            WindowRequest::ProjectEditor { .. } => ("Pulsar Engine - Project Editor", (1920.0, 1080.0)),
             WindowRequest::ProjectSplash { .. } => ("Loading Project...", (960.0, 540.0)),
             WindowRequest::CloseWindow { .. } => return, // Handled elsewhere
         };
 
-        println!("≡ƒ¬ƒ [CREATE-WINDOW] Creating new window: {} (type: {:?})", title, request);
+        tracing::debug!("≡ƒ¬ƒ [CREATE-WINDOW] Creating new window: {} (type: {:?})", title, request);
 
         let mut window_attributes = WinitWindow::default_attributes()
             .with_title(title)
@@ -171,7 +172,7 @@ impl WinitGpuiApp {
         self.windows.insert(window_id, window_state);
         self.engine_state.increment_window_count();
 
-        println!("Γ£à Window created: {} (total windows: {})", title, self.engine_state.window_count());
+        tracing::debug!("Γ£à Window created: {} (total windows: {})", title, self.engine_state.window_count());
     }
 }
 

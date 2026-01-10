@@ -127,7 +127,7 @@ pub fn handle_keyboard_input(
     window_id: WindowId,
     event: KeyEvent,
 ) {
-    println!("🎹 Keyboard event: {:?}, repeat: {}", event.physical_key, event.repeat);
+    tracing::debug!("🎹 Keyboard event: {:?}, repeat: {}", event.physical_key, event.repeat);
 
     // Get the window state
     let Some(window_state) = app.windows.get_mut(&window_id) else {
@@ -136,6 +136,7 @@ pub fn handle_keyboard_input(
 
     // Forward keyboard events to GPUI
     if let Some(gpui_window_ref) = window_state.gpui_window.as_ref() {
+        // gpui_window_ref.inject_input_event(cx, event)
         // Store event and create keystroke before borrowing
         let current_modifiers_val = window_state.current_modifiers;
 
@@ -154,6 +155,7 @@ pub fn handle_keyboard_input(
                         key_char,
                     })
                 } else {
+                    tracing::debug!("⚠️ Unsupported key code: {:?}", code);
                     None
                 }
             }
@@ -163,7 +165,7 @@ pub fn handle_keyboard_input(
         if let Some(keystroke) = keystroke_opt {
             let gpui_event = match event.state {
                 ElementState::Pressed => {
-                    println!("🔽 KeyDown: {:?}", keystroke);
+                    tracing::debug!("🔽 KeyDown: {:?}", keystroke);
 
                     PlatformInput::KeyDown(KeyDownEvent {
                         keystroke,
@@ -171,13 +173,13 @@ pub fn handle_keyboard_input(
                     })
                 }
                 ElementState::Released => {
-                    println!("🔽 KeyUp: {:?}", keystroke);
+                    tracing::debug!("🔽 KeyUp: {:?}", keystroke);
 
                     PlatformInput::KeyUp(KeyUpEvent { keystroke })
                 }
             };
 
-            let _ = window_state.gpui_app.update(|cx| gpui_window_ref.inject_input_event(cx, gpui_event));
+            window_state.gpui_app.update(|cx| gpui_window_ref.inject_input_event(cx, gpui_event)).unwrap();
         }
     }
 

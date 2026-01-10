@@ -14,10 +14,10 @@ pub struct ToggleFileManager;
 #[action(namespace = pulsar_app)]
 pub struct ToggleProblems;
 
-/// Action to toggle the terminal
+/// Action to toggle the type debugger
 #[derive(Action, Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[action(namespace = pulsar_app)]
-pub struct ToggleTerminal;
+pub struct ToggleTypeDebugger;
 
 /// Action to toggle multiplayer collaboration
 #[derive(Action, Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema)]

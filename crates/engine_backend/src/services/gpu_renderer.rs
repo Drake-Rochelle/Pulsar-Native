@@ -59,30 +59,30 @@ impl GpuRenderer {
         let width = display_width;
         let height = display_height;
         
-        println!("[GPU-RENDERER] 🚀 Initializing OPTIMIZED Bevy renderer at {}x{}", width, height);
-        println!("[GPU-RENDERER] Format: BGRA8UnormSrgb (Bevy pipeline compatible)");
+        tracing::debug!("[GPU-RENDERER] 🚀 Initializing OPTIMIZED Bevy renderer at {}x{}", width, height);
+        tracing::debug!("[GPU-RENDERER] Format: BGRA8UnormSrgb (Bevy pipeline compatible)");
         
         let runtime = get_runtime();
         let game_state_for_bevy = game_thread_state.clone();
         let bevy_renderer = runtime.block_on(async move {
-            println!("[GPU-RENDERER] Creating optimized renderer asynchronously...");
+            tracing::debug!("[GPU-RENDERER] Creating optimized renderer asynchronously...");
             match tokio::time::timeout(
                 tokio::time::Duration::from_secs(10),
                 BevyRenderer::new_with_game_thread(width, height, game_state_for_bevy)
             ).await {
                 Ok(renderer) => {
-                    println!("[GPU-RENDERER] ✅ Optimized renderer created successfully!");
+                    tracing::debug!("[GPU-RENDERER] ✅ Optimized renderer created successfully!");
                     Some(renderer)
                 }
                 Err(_) => {
-                    println!("[GPU-RENDERER] ⚠️  Renderer creation timed out! Using fallback.");
+                    tracing::debug!("[GPU-RENDERER] ⚠️  Renderer creation timed out! Using fallback.");
                     None
                 }
             }
         });
 
         if bevy_renderer.is_none() {
-            println!("[GPU-RENDERER] Using CPU fallback rendering");
+            tracing::debug!("[GPU-RENDERER] Using CPU fallback rendering");
         }
 
         Self {
@@ -110,10 +110,10 @@ impl GpuRenderer {
             if self.last_metrics_print.elapsed().as_secs() >= 5 {
                 let metrics = renderer.get_metrics();
                 let fps = self.get_fps();
-                println!("\n[GPU-RENDERER] 🚀 IMMEDIATE MODE - NO COPIES:");
-                println!("  Bevy frames rendered: {}", metrics.frames_rendered);
-                println!("  Bevy FPS: {:.1}", metrics.bevy_fps);
-                println!("  🔥 TRUE ZERO-COPY - Direct GPU texture display!");
+                tracing::debug!("\n[GPU-RENDERER] 🚀 IMMEDIATE MODE - NO COPIES:");
+                tracing::debug!("  Bevy frames rendered: {}", metrics.frames_rendered);
+                tracing::debug!("  Bevy FPS: {:.1}", metrics.bevy_fps);
+                tracing::debug!("  🔥 TRUE ZERO-COPY - Direct GPU texture display!");
                 self.last_metrics_print = Instant::now();
             }
         }
@@ -270,7 +270,7 @@ impl GpuRenderer {
             self.display_height = display_height;
             // NO temp_framebuffer to resize!
             
-            println!("[GPU-RENDERER] Resizing to {}x{}", display_width, display_height);
+            tracing::debug!("[GPU-RENDERER] Resizing to {}x{}", display_width, display_height);
             
             // Recreate Bevy renderer at new resolution
             if let Some(ref mut renderer) = self.bevy_renderer {

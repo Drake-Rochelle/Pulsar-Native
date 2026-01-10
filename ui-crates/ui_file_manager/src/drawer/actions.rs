@@ -27,6 +27,19 @@ pub struct NewClass {
     pub folder_path: String,
 }
 
+#[derive(Action, Clone, Debug, PartialEq, Deserialize, JsonSchema)]
+#[action(namespace = file_manager)]
+pub struct CreateAsset {
+    #[serde(default)]
+    pub file_type_id: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub extension: String,
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub default_content: serde_json::Value,
+}
+
 #[derive(Action, Clone, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[action(namespace = file_manager)]
 pub struct DeleteItem {

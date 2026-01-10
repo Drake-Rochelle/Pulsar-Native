@@ -57,13 +57,13 @@ impl BevyViewportState {
         self.height = height;
 
         #[cfg(target_os = "windows")]
-        println!("[BEVY-VIEWPORT] ✅ Initialized with DirectX shared textures {}x{}", width, height);
+        tracing::debug!("[BEVY-VIEWPORT] ✅ Initialized with DirectX shared textures {}x{}", width, height);
         #[cfg(target_os = "macos")]
-        println!("[BEVY-VIEWPORT] ✅ Initialized with Metal IOSurface {}x{}", width, height);
+        tracing::debug!("[BEVY-VIEWPORT] ✅ Initialized with Metal IOSurface {}x{}", width, height);
         #[cfg(target_os = "linux")]
-        println!("[BEVY-VIEWPORT] ✅ Initialized with Vulkan dma-buf {}x{}", width, height);
+        tracing::debug!("[BEVY-VIEWPORT] ✅ Initialized with Vulkan dma-buf {}x{}", width, height);
 
-        println!("[BEVY-VIEWPORT] 🔥 Zero-copy GPU rendering enabled! (Universal RGBA8 format)");
+        tracing::debug!("[BEVY-VIEWPORT] 🔥 Zero-copy GPU rendering enabled! (Universal RGBA8 format)");
     }
 
     /// Notify that Bevy has finished rendering a frame (swaps the active buffer)
@@ -110,7 +110,7 @@ pub struct BevyViewport {
 impl BevyViewport {
     /// Create a new Bevy viewport
     pub fn new<V: 'static>(width: u32, height: u32, cx: &mut Context<V>) -> Self {
-        println!("[BEVY-VIEWPORT] 🚀 Creating viewport {}x{}", width, height);
+        tracing::debug!("[BEVY-VIEWPORT] 🚀 Creating viewport {}x{}", width, height);
         
         Self {
             state: Arc::new(parking_lot::RwLock::new(BevyViewportState::new(width, height))),
