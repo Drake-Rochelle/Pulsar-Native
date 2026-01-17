@@ -63,13 +63,13 @@ pub fn print_banner(config: &Config) {
         "Production-grade multiplayer editing".bright_white()
     );
 
-    println!("{}", banner);
+    tracing::debug!("{}", banner);
 }
 
 /// Display configuration in a pretty formatted way
 pub fn log_config(config: &Config) {
-    println!("\n{}", "📋 Configuration".bright_cyan().bold());
-    println!("{}", "━".repeat(60).bright_black());
+    tracing::debug!("\n{}", "📋 Configuration".bright_cyan().bold());
+    tracing::debug!("{}", "━".repeat(60).bright_black());
     
     log_config_item("HTTP Server", &format!("{}", config.http_bind), "🌐");
     log_config_item("QUIC Relay", &format!("{}", config.quic_bind), "⚡");
@@ -106,12 +106,12 @@ pub fn log_config(config: &Config) {
         log_config_item("Telemetry", endpoint, "📡");
     }
     
-    println!("{}\n", "━".repeat(60).bright_black());
+    tracing::debug!("{}\n", "━".repeat(60).bright_black());
 }
 
 /// Log a single configuration item with emoji and formatting
 fn log_config_item(label: &str, value: &str, emoji: &str) {
-    println!(
+    tracing::debug!(
         "  {} {:<18} {}",
         emoji,
         label.bright_white().bold(),
@@ -156,12 +156,12 @@ pub fn log_status(icon: &str, message: &str, status: &str, is_success: bool) {
         status.bright_red().bold()
     };
     
-    tracing::info!("{} {} → {}", icon, message, colored_status);
+    tracing::debug!("{} {} → {}", icon, message, colored_status);
 }
 
 /// Log a metric with formatting
 pub fn log_metric(icon: &str, label: &str, value: &str) {
-    tracing::info!(
+    tracing::debug!(
         "{} {} = {}",
         icon,
         label.bright_cyan(),

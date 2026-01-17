@@ -38,13 +38,13 @@ impl PulsarApp {
         self.toggle_problems(window, cx);
     }
 
-    fn on_toggle_terminal(
+    fn on_toggle_type_debugger(
         &mut self,
-        _: &ToggleTerminal,
+        _: &ToggleTypeDebugger,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.toggle_terminal(window, cx);
+        self.toggle_type_debugger(window, cx);
     }
 
     fn on_toggle_multiplayer(
@@ -122,9 +122,10 @@ impl PulsarApp {
                     CommandType::ToggleFileManager => {
                         self.toggle_drawer(window, cx);
                     }
-                    CommandType::ToggleTerminal => {
-                        self.toggle_terminal(window, cx);
-                    }
+                    // TODO: Add the ability for plugins to register command palette commands
+                    // CommandType::ToggleTerminal => {
+                    //     self.toggle_terminal(window, cx);
+                    // }
                     CommandType::ToggleMultiplayer => {
                         self.toggle_multiplayer(window, cx);
                     }
@@ -184,7 +185,7 @@ impl PulsarApp {
                 })
                 .unwrap_or((None, None, None));
 
-            tracing::info!("🎮 Updating Discord presence: project={:?}, tab={:?}, file={:?}, icon={:?}",
+            tracing::debug!("🎮 Updating Discord presence: project={:?}, tab={:?}, file={:?}, icon={:?}",
                 project_name, tab_name, file_path, discord_icon_key);
 
             if let Some(discord) = engine_state.discord() {

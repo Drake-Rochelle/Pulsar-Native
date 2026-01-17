@@ -19,6 +19,7 @@ pub use discord::DiscordPresence;
 
 use std::sync::Arc;
 use parking_lot::RwLock;
+use type_db::TypeDatabase;
 
 /// Global engine state
 #[derive(Clone)]
@@ -32,6 +33,7 @@ struct EngineStateInner {
     window_count: usize,
     window_sender: Option<WindowRequestSender>,
     discord_presence: Option<DiscordPresence>,
+    type_database: Option<Arc<TypeDatabase>>,
 }
 
 impl EngineState {
@@ -44,6 +46,7 @@ impl EngineState {
                 window_count: 0,
                 window_sender: None,
                 discord_presence: None,
+                type_database: None,
             })),
         }
     }
@@ -79,10 +82,10 @@ impl EngineState {
         let inner = self.inner.read();
         if let Some(sender) = &inner.window_sender {
             if let Err(e) = sender.send(request) {
-                eprintln!("❌ Failed to send window request: {}", e);
+                tracing::error!("❌ Failed to send window request: {}", e);
             }
         } else {
-            eprintln!("❌ Window sender not initialized!");
+            tracing::error!("❌ Window sender not initialized!");
         }
     }
 
@@ -152,6 +155,16 @@ impl EngineState {
             discord.update_all(project_name, tab_name, file_path);
         }
     }
+
+    /// Set the global TypeDatabase instance
+    pub fn set_type_database(&self, type_database: Arc<TypeDatabase>) {
+        self.inner.write().type_database = Some(type_database);
+    }
+
+    /// Get the global TypeDatabase instance
+    pub fn type_database(&self) -> Option<Arc<TypeDatabase>> {
+        self.inner.read().type_database.clone()
+    }
 }
 
 impl Default for EngineState {
@@ -162,3 +175,16 @@ impl Default for EngineState {
 
 use std::sync::OnceLock;
 static GLOBAL_STATE: OnceLock<EngineState> = OnceLock::new();
+
+// Project path storage
+static PROJECT_PATH: OnceLock<String> = OnceLock::new();
+
+/// Set the current project path (should be called when a project is opened)
+pub fn set_project_path(path: String) {
+    let _ = PROJECT_PATH.set(path);
+}
+
+/// Get the current project path
+pub fn get_project_path() -> Option<&'static str> {
+    PROJECT_PATH.get().map(|s| s.as_str())
+}

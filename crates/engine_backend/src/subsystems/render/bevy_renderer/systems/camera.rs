@@ -44,41 +44,100 @@ pub fn camera_movement_system(
 
     let delta_time = time.delta_secs();
     
-    // Calculate effective move speed (with boost)
-    let effective_speed = if camera_input.boost {
+    // --- Unreal-style movement ramp-up (acceleration) with doubled ramp and mouse smoothing ---
+    static mut VELOCITY: Vec3 = Vec3::ZERO;
+    static mut SMOOTHED_MOUSE_DELTA: (f32, f32) = (0.0, 0.0);
+    let mut input_dir = Vec3::ZERO;
+    if camera_input.forward.abs() > 0.001 {
+        input_dir += transform.forward().as_vec3() * camera_input.forward;
+    }
+    if camera_input.right.abs() > 0.001 {
+        input_dir += transform.right().as_vec3() * camera_input.right;
+    }
+    if camera_input.up.abs() > 0.001 {
+        input_dir += Vec3::Y * camera_input.up;
+    }
+    if input_dir.length_squared() > 0.0 {
+        input_dir = input_dir.normalize();
+    }
+    let base_speed = if camera_input.boost {
         camera_input.move_speed * 3.0
     } else {
         camera_input.move_speed
     };
-    
-    // === FPS-STYLE MOVEMENT (Right mouse + WASD) ===
-    // Forward/backward movement (local Z axis)
-    if camera_input.forward.abs() > 0.001 {
-        let forward = transform.forward();
-        transform.translation += forward.as_vec3() * camera_input.forward * effective_speed * delta_time;
+    let accel = base_speed * 12.0; // doubled acceleration rate
+    let friction = 4.0;
+    unsafe {
+        // Accelerate towards input direction
+        let desired_velocity = input_dir * base_speed;
+        let delta_v = desired_velocity - VELOCITY;
+        let accel_step = accel * delta_time;
+        let friction_step = friction * delta_time;
+        if delta_v.length() > accel_step {
+            VELOCITY += delta_v.normalize() * accel_step;
+        } else {
+            VELOCITY = desired_velocity;
+        }
+        if input_dir == Vec3::ZERO {
+            let speed = VELOCITY.length();
+            if speed > friction_step {
+                VELOCITY -= VELOCITY.normalize() * friction_step;
+            } else {
+                VELOCITY = Vec3::ZERO;
+            }
+        }
+        transform.translation += VELOCITY * delta_time;
     }
-    
-    // Left/right strafe (local X axis)
-    if camera_input.right.abs() > 0.001 {
-        let right = transform.right();
-        transform.translation += right.as_vec3() * camera_input.right * effective_speed * delta_time;
+
+    // --- Mouse delta smoothing for rotation ---
+    let smoothing = 0.25; // 0 = no smoothing, 1 = infinite smoothing
+    let (smooth_x, smooth_y) = unsafe {
+        let (prev_x, prev_y) = SMOOTHED_MOUSE_DELTA;
+        let target_x = camera_input.mouse_delta_x;
+        let target_y = camera_input.mouse_delta_y;
+        let smooth_x = prev_x + (target_x - prev_x) * smoothing;
+        let smooth_y = prev_y + (target_y - prev_y) * smoothing;
+        SMOOTHED_MOUSE_DELTA = (smooth_x, smooth_y);
+        (smooth_x, smooth_y)
+    };
+    // Use smoothed deltas for rotation
+    if smooth_x.abs() > 0.001 || smooth_y.abs() > 0.001 {
+        let yaw_delta = -smooth_x * camera_input.look_sensitivity * delta_time;
+        let (mut yaw, mut pitch, mut roll) = transform.rotation.to_euler(EulerRot::YXZ);
+        yaw += yaw_delta;
+        let pitch_delta = -smooth_y * camera_input.look_sensitivity * delta_time;
+        pitch += pitch_delta;
+        // Clamp pitch between -89 and 89 degrees (in radians)
+        let min_pitch = -std::f32::consts::FRAC_PI_2 + 0.01745; // ~-89 deg
+        let max_pitch = std::f32::consts::FRAC_PI_2 - 0.01745;  // ~89 deg
+        if pitch < min_pitch {
+            pitch = min_pitch;
+        } else if pitch > max_pitch {
+            pitch = max_pitch;
+        }
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
     }
-    
-    // Up/down movement (world Y axis)
-    if camera_input.up.abs() > 0.001 {
-        transform.translation.y += camera_input.up * effective_speed * delta_time;
-    }
+    // Clear mouse deltas after use
+    camera_input.mouse_delta_x = 0.0;
+    camera_input.mouse_delta_y = 0.0;
     
     // === ROTATION (Right mouse + drag) ===
     if camera_input.mouse_delta_x.abs() > 0.001 || camera_input.mouse_delta_y.abs() > 0.001 {
-        // Yaw (rotate around world Y axis)
+        // Yaw (rotate around world Y axis) and clamp pitch
         let yaw_delta = -camera_input.mouse_delta_x * camera_input.look_sensitivity * delta_time;
-        transform.rotate_y(yaw_delta);
-        
-        // Pitch (rotate around local X axis)
+        let (mut yaw, mut pitch, mut roll) = transform.rotation.to_euler(EulerRot::YXZ);
+        yaw += yaw_delta;
         let pitch_delta = -camera_input.mouse_delta_y * camera_input.look_sensitivity * delta_time;
-        transform.rotate_local_x(pitch_delta);
-        
+        pitch += pitch_delta;
+        // Clamp pitch between -89 and 89 degrees (in radians)
+        let min_pitch = -std::f32::consts::FRAC_PI_2 + 0.01745; // ~-89 deg
+        let max_pitch = std::f32::consts::FRAC_PI_2 - 0.01745;  // ~89 deg
+        if pitch < min_pitch {
+            pitch = min_pitch;
+        } else if pitch > max_pitch {
+            pitch = max_pitch;
+        }
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
         // Clear mouse deltas after use
         camera_input.mouse_delta_x = 0.0;
         camera_input.mouse_delta_y = 0.0;

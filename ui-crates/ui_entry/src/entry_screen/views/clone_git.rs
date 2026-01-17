@@ -3,53 +3,60 @@ use ui::{
     button::{Button, ButtonVariants as _},
     h_flex, v_flex, Icon, IconName, ActiveTheme as _,
     divider::Divider, progress::Progress,
+    input::TextInput,
 };
 use crate::entry_screen::EntryScreen;
 
-pub fn render_clone_git(screen: &EntryScreen, cx: &mut Context<EntryScreen>) -> impl IntoElement {
+pub fn render_clone_git(screen: &mut EntryScreen, cx: &mut Context<EntryScreen>) -> impl IntoElement {
     let theme = cx.theme();
-    let git_url_display = if screen.git_repo_url.is_empty() {
-        "Enter repository URL...".to_string()
-    } else {
-        screen.git_repo_url.clone()
-    };
+
     let progress_message = screen.clone_progress.as_ref()
         .map(|p| {
             let prog = p.lock();
             (prog.message.clone(), prog.current, prog.total, prog.error.clone())
         });
-    
+
     v_flex()
         .size_full()
         .p_12()
-        .gap_6()
+        .gap_8()
         .child(
-            h_flex()
-                .gap_3()
-                .items_center()
+            v_flex()
+                .gap_2()
                 .child(
-                    Icon::new(IconName::GitHub)
-                        .size(px(24.))
-                        .text_color(theme.primary)
+                    h_flex()
+                        .gap_3()
+                        .items_center()
+                        .child(
+                            Icon::new(IconName::GitHub)
+                                .size(px(28.))
+                                .text_color(theme.primary)
+                        )
+                        .child(
+                            div()
+                                .text_3xl()
+                                .font_weight(gpui::FontWeight::BOLD)
+                                .text_color(theme.foreground)
+                                .child("Clone from Git")
+                        )
                 )
                 .child(
                     div()
-                        .text_2xl()
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .text_color(theme.foreground)
-                        .child("Clone from Git Repository")
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child("Clone an existing Pulsar project from any Git repository")
                 )
         )
-        .child(Divider::horizontal())
         .child(
             v_flex()
-                .max_w(px(600.))
-                .gap_6()
-                .p_6()
+                .max_w(px(700.))
+                .gap_8()
+                .p_8()
                 .border_1()
                 .border_color(theme.border)
-                .rounded_lg()
+                .rounded_xl()
                 .bg(theme.sidebar)
+                .shadow_sm()
                 .child(
                     v_flex()
                         .gap_2()
@@ -59,22 +66,7 @@ pub fn render_clone_git(screen: &EntryScreen, cx: &mut Context<EntryScreen>) -> 
                                 .text_color(theme.foreground)
                                 .child("Repository URL")
                         )
-                        .child(
-                            div()
-                                .px_3()
-                                .py_2()
-                                .border_1()
-                                .border_color(theme.border)
-                                .rounded_md()
-                                .bg(theme.background)
-                                .text_sm()
-                                .text_color(if screen.git_repo_url.is_empty() {
-                                    theme.muted_foreground
-                                } else {
-                                    theme.foreground
-                                })
-                                .child(git_url_display.clone())
-                        )
+                        .child(TextInput::new(&screen.git_repo_url_input))
                         .child(
                             div()
                                 .text_xs()

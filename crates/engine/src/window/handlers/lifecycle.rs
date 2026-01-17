@@ -12,7 +12,8 @@ use engine_state::WindowRequest;
 /// Handle application resumed event
 ///
 /// Called when the application starts or resumes. Creates the initial main
-/// entry window if no windows exist.
+/// entry window if no windows exist, or creates a ProjectSplash window if
+/// launched via URI scheme.
 ///
 /// # Arguments
 /// * `app` - The application state
@@ -26,9 +27,27 @@ pub fn handle_resumed(
         return;
     }
 
-    println!("✨ Creating main entry window...");
+    // Check for URI-launched project
+    if let Some(engine_state) = engine_state::EngineState::global() {
+        if let Some(uri_path) = engine_state.get_metadata("uri_project_path") {
+            if !uri_path.is_empty() {
+                tracing::debug!("Opening project from URI: {}", uri_path);
 
-    // Create the main entry window using the modular system
+                // Clear metadata (consume the value)
+                engine_state.set_metadata("uri_project_path".to_string(), String::new());
+
+                // Create project splash screen instead of entry
+                app.create_window(event_loop, WindowRequest::ProjectSplash {
+                    project_path: uri_path
+                });
+                return;
+            }
+        }
+    }
+
+    tracing::debug!("✨ Creating main entry window...");
+
+    // Default: Create the main entry window using the modular system
     app.create_window(event_loop, WindowRequest::Entry);
 }
 
@@ -75,7 +94,7 @@ pub fn handle_about_to_wait(
                 // Find and close the window with this ID
                 let window_id_native = unsafe { std::mem::transmute::<u64, WindowId>(window_id) };
                 if app.windows.remove(&window_id_native).is_some() {
-                    println!("✨ Closed window with ID: {:?}", window_id);
+                    tracing::debug!("✨ Closed window with ID: {:?}", window_id);
                     app.engine_state.decrement_window_count();
                 }
             }
@@ -106,7 +125,7 @@ pub fn handle_about_to_wait(
             // Mark as initialized
             let window_state = app.windows.get_mut(&window_id).expect("Window must exist");
             window_state.gpui_window_initialized = true;
-            println!("✨ GPUI window opened! Ready for GPU composition!\n");
+            tracing::debug!("✨ GPUI window opened! Ready for GPU composition!\n");
         }
     }
 }

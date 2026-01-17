@@ -1,12 +1,14 @@
 //! Rendering implementation for PulsarApp
 
 use std::time::Duration;
-use gpui::{prelude::*, div, px, relative, rgb, Animation, AnimationExt as _, App, Context, Focusable, FocusHandle, Hsla, IntoElement, MouseButton, MouseMoveEvent, Render, Window};
+use gpui::{prelude::*, div, px, relative, rgb, Animation, AnimationExt as _, AnyElement, App, Context, Focusable, FocusHandle, Hsla, IntoElement, MouseButton, MouseMoveEvent, Render, Window};
 use ui::{
     h_flex, v_flex, ActiveTheme as _, ContextModal as _, StyledExt as _, button::{Button, ButtonVariants as _}, Icon, IconName,
 };
 use ui::notification::Notification;
 use engine_backend::services::rust_analyzer_manager::AnalyzerStatus;
+use plugin_editor_api::{StatusbarPosition, StatusbarAction};
+use std::path::PathBuf;
 
 use super::PulsarApp;
 use crate::actions::*;
@@ -25,6 +27,11 @@ impl PulsarApp {
             .state.problems_drawer
             .read(cx)
             .count_by_severity(ui_problems::DiagnosticSeverity::Warning);
+
+        let type_count = self
+            .state.type_debugger_drawer
+            .read(cx)
+            .total_count();
 
         let (status_color, status_icon) = match status {
             AnalyzerStatus::Ready => (cx.theme().success, IconName::CheckCircle),
@@ -148,19 +155,43 @@ impl PulsarApp {
                                     })),
                             )
                             .child(
-                                Button::new("toggle-terminal")
+                                Button::new("toggle-type-debugger")
                                     .ghost()
                                     .icon(
-                                        Icon::new(IconName::Terminal)
+                                        Icon::new(IconName::Database)
                                             .size(px(16.))
-                                            .text_color(cx.theme().muted_foreground)
+                                            .text_color(cx.theme().accent)
                                     )
+                                    .relative()
                                     .px_2()
                                     .py_1()
                                     .rounded(px(4.))
-                                    .tooltip("Terminal")
+                                    .when(type_count > 0, |this| {
+                                        this.child(
+                                            div()
+                                                .absolute()
+                                                .top(px(-4.))
+                                                .right(px(-4.))
+                                                .min_w(px(16.))
+                                                .h(px(16.))
+                                                .px_1()
+                                                .rounded(px(8.))
+                                                .bg(cx.theme().accent)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .font_bold()
+                                                        .text_color(rgb(0xFFFFFF))
+                                                        .child(format!("{}", type_count)),
+                                                ),
+                                        )
+                                    })
+                                    .tooltip(format!("{} Types", type_count))
                                     .on_click(cx.listener(|app, _, window, cx| {
-                                        app.toggle_terminal(window, cx);
+                                        app.toggle_type_debugger(window, cx);
                                     })),
                             )
                             .child(
@@ -179,6 +210,8 @@ impl PulsarApp {
                                         app.toggle_multiplayer(window, cx);
                                     })),
                             )
+                            // Render plugin statusbar buttons for left position
+                            .children(self.render_plugin_statusbar_buttons(StatusbarPosition::Left, cx))
                             .child(
                                 div()
                                     .w(px(1.))
@@ -278,6 +311,12 @@ impl PulsarApp {
                             .h(px(18.))
                             .bg(cx.theme().border),
                     )
+                    // Render plugin statusbar buttons for right position
+                    .children(
+                        self.render_plugin_statusbar_buttons(StatusbarPosition::Right, cx)
+                            .into_iter()
+                            .map(|btn| btn.into_any_element())
+                    )
                     .child(
                         h_flex()
                             .items_center()
@@ -302,6 +341,120 @@ impl PulsarApp {
                             ),
                     ),
             )
+    }
+    
+    /// Render statusbar buttons registered by plugins
+    fn render_plugin_statusbar_buttons(&self, position: StatusbarPosition, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let buttons = self.state.plugin_manager.get_statusbar_buttons_for_position(position);
+        
+        buttons
+            .into_iter()
+            .enumerate()
+            .map(|(idx, btn_def)| {
+                let mut button = Button::new(("plugin-statusbar", idx))
+                    .ghost()
+                    .icon(
+                        Icon::new(btn_def.icon.clone())
+                            .size(px(16.))
+                            .text_color(btn_def.icon_color.unwrap_or_else(|| cx.theme().muted_foreground))
+                    )
+                    .relative()
+                    .px_2()
+                    .py_1()
+                    .rounded(px(4.));
+                
+                // Add active styling if specified
+                if btn_def.active {
+                    button = button.bg(cx.theme().primary.opacity(0.15));
+                }
+                
+                // Add badge if specified
+                if let Some(count) = btn_def.badge_count {
+                    if count > 0 {
+                        button = button.child(
+                            div()
+                                .absolute()
+                                .top(px(-4.))
+                                .right(px(-4.))
+                                .min_w(px(16.))
+                                .h(px(16.))
+                                .px_1()
+                                .rounded(px(8.))
+                                .bg(btn_def.badge_color.unwrap_or_else(|| cx.theme().accent))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_bold()
+                                        .text_color(rgb(0xFFFFFF))
+                                        .child(count.to_string()),
+                                ),
+                        );
+                    }
+                }
+                
+                // Add tooltip
+                button = button.tooltip(btn_def.tooltip.clone());
+                
+                // Clone what we need for the closure
+                let action = btn_def.action.clone();
+                let callback = btn_def.custom_callback;
+                
+                // Add click handler based on action type
+                button = match action {
+                    StatusbarAction::OpenEditor { editor_id, file_path } => {
+                        button.on_click(cx.listener(move |app, _, window, cx| {
+                            tracing::info!("Opening editor {:?}", editor_id);
+                            
+                            let path = file_path.clone().unwrap_or_else(|| PathBuf::new());
+                            
+                            // Find which plugin owns this editor
+                            let plugin_id: Option<plugin_editor_api::PluginId> = app.state.plugin_manager.find_plugin_for_editor(&editor_id);
+                            
+                            if let Some(plugin_id) = plugin_id {
+                                match app.state.plugin_manager.create_editor(
+                                    &plugin_id,
+                                    &editor_id,
+                                    path,
+                                    window,
+                                    cx
+                                ) {
+                                    Ok((panel, _editor_instance)) => {
+                                        app.state.center_tabs.update(cx, |tabs, cx| {
+                                            tabs.add_panel(panel, window, cx);
+                                        });
+                                        tracing::info!("Successfully opened editor {:?}", editor_id);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to open editor {:?}: {:?}", editor_id, e);
+                                    }
+                                }
+                            } else {
+                                tracing::error!("No plugin found for editor {:?}", editor_id);
+                            }
+                        }))
+                    }
+                    StatusbarAction::ToggleDrawer { drawer_id } => {
+                        button.on_click(cx.listener(move |_app, _, _window, _cx| {
+                            tracing::info!("Plugin statusbar button clicked: toggle drawer {}", drawer_id);
+                        }))
+                    }
+                    StatusbarAction::Custom => {
+                        if let Some(cb) = callback {
+                            button.on_click(move |_, window, cx| {
+                                cb(window, cx);
+                            })
+                        } else {
+                            button
+                        }
+                    }
+                };
+                
+                button.into_any_element()
+            })
+            .collect()
     }
 }
 
@@ -352,7 +505,7 @@ impl Render for PulsarApp {
             .track_focus(&self.state.focus_handle)
             .on_action(cx.listener(Self::on_toggle_file_manager))
             .on_action(cx.listener(Self::on_toggle_problems))
-            .on_action(cx.listener(Self::on_toggle_terminal))
+            .on_action(cx.listener(Self::on_toggle_type_debugger))
             .on_action(cx.listener(Self::on_toggle_command_palette))
             .child(
                 div()

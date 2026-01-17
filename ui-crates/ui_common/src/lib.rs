@@ -4,7 +4,6 @@
 
 pub mod command_palette;
 pub mod file_utils;
-pub mod file_browser;
 pub mod helpers;
 pub mod menu;
 pub mod shared;
@@ -16,4 +15,4 @@ pub use file_utils::{FileInfo, FileType, find_openable_files};
 pub use shared::{StatusBar, ViewportControls, Toolbar, ToolbarButton, PropertyField};
 
 // Re-export diagnostics from ui crate
-pub use ui::diagnostics::{Diagnostic, DiagnosticSeverity};
+pub use ui::diagnostics::{Diagnostic, DiagnosticSeverity, TextEdit, CodeAction};

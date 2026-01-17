@@ -14,7 +14,7 @@ mod project_docs;
 mod manual_docs;
 
 use engine_docs::{EngineDocsState, TreeNode};
-use project_docs::ProjectDocsState;
+use project_docs::{ProjectDocsState, ProjectTreeNode};
 use manual_docs::{ManualDocsState, FileEntry, ViewMode};
 
 // ============================================================================
@@ -69,23 +69,23 @@ impl DocumentationWindow {
         // Subscribe to engine search input
         let engine_search_state = engine_docs.search_input_state.clone();
         cx.subscribe(&engine_search_state, |this: &mut Self, state, _event: &ui::input::InputEvent, cx| {
-            this.engine_docs.search_query = state.read(cx).text().to_string();
+            this.engine_docs.search_query = state.read(cx).value().to_string();
             this.engine_docs.rebuild_visible_list();
             cx.notify();
         }).detach();
 
-        // Subscribe to manual docs editor input
+        // Subscribe to manual docs editor for live preview updates
         let manual_editor_state = manual_docs.editor_input_state.clone();
         cx.subscribe(&manual_editor_state, |this: &mut Self, state, _event: &ui::input::InputEvent, cx| {
-            let content = state.read(cx).text().to_string();
-            this.manual_docs.update_preview(content);
+            // Update preview asynchronously - just update the string, rendering happens on next frame
+            this.manual_docs.update_preview(cx);
             cx.notify();
         }).detach();
 
         // Subscribe to new file input
         let new_file_state = new_file_input_state.clone();
         cx.subscribe(&new_file_state, |this: &mut Self, state, _event: &ui::input::InputEvent, cx| {
-            this.new_file_name = state.read(cx).text().to_string();
+            this.new_file_name = state.read(cx).value().to_string();
             cx.notify();
         }).detach();
 
@@ -141,52 +141,71 @@ impl Focusable for DocumentationWindow {
 impl Render for DocumentationWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let bg = theme.background;
-        let sidebar_bg = theme.sidebar;
-        let border = theme.border;
-        let fg = theme.foreground;
-        let muted_fg = theme.muted_foreground;
-
-        let breadcrumb_parts = self.render_breadcrumbs();
         let current_category = self.current_category;
 
         v_flex()
             .track_focus(&self.focus_handle)
             .size_full()
-            .bg(bg)
+            .bg(theme.background)
             .child(TitleBar::new().child("Documentation"))
             .child(
-                // Header with tabs
+                // Professional header with modern styling
                 v_flex()
                     .w_full()
-                    .bg(sidebar_bg)
+                    .gap_3()
+                    .px_6()
+                    .py_4()
                     .border_b_1()
-                    .border_color(border)
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
                     .child(
                         h_flex()
                             .w_full()
-                            .h(px(48.0))
                             .items_center()
-                            .px_4()
-                            .gap_4()
+                            .justify_between()
                             .child(
-                                Icon::new(IconName::BookOpen)
-                                    .size_5()
-                                    .text_color(theme.accent)
+                                h_flex()
+                                    .gap_3()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .w(px(48.0))
+                                            .h(px(48.0))
+                                            .rounded_lg()
+                                            .bg(theme.accent.opacity(0.15))
+                                            .border_1()
+                                            .border_color(theme.accent.opacity(0.3))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(
+                                                Icon::new(IconName::BookOpen)
+                                                    .size(px(24.0))
+                                                    .text_color(theme.accent)
+                                            )
+                                    )
+                                    .child(
+                                        v_flex()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .text_2xl()
+                                                    .font_weight(gpui::FontWeight::BOLD)
+                                                    .text_color(theme.foreground)
+                                                    .child("Documentation")
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .text_color(theme.muted_foreground)
+                                                    .child("Browse and create project documentation")
+                                            )
+                                    )
                             )
-                            .child(
-                                div()
-                                    .text_base()
-                                    .font_semibold()
-                                    .text_color(fg)
-                                    .child("Documentation")
-                            )
-                            .child(div().flex_1())
                             .child(
                                 Button::new("refresh-docs")
                                     .icon(IconName::Refresh)
                                     .ghost()
-                                    .small()
                                     .tooltip("Refresh Documentation")
                                     .on_click(cx.listener(|this, _event, _window, cx| {
                                         this.refresh_current_category();
@@ -194,17 +213,15 @@ impl Render for DocumentationWindow {
                                     }))
                             )
                     )
+                    // Category tabs with modern styling
                     .child(
-                        // Category tabs
                         h_flex()
                             .w_full()
-                            .px_4()
                             .gap_2()
-                            .pb_2()
                             .child(
                                 Button::new("tab-engine")
                                     .label("Engine Docs")
-                                    .small()
+                                    .icon(IconName::Code)
                                     .when(current_category == DocCategory::Engine, |btn| btn.primary())
                                     .when(current_category != DocCategory::Engine, |btn| btn.ghost())
                                     .on_click(cx.listener(|this, _event, _window, cx| {
@@ -215,7 +232,7 @@ impl Render for DocumentationWindow {
                             .child(
                                 Button::new("tab-project")
                                     .label("Project Docs")
-                                    .small()
+                                    .icon(IconName::Folder)
                                     .when(current_category == DocCategory::Project, |btn| btn.primary())
                                     .when(current_category != DocCategory::Project, |btn| btn.ghost())
                                     .on_click(cx.listener(|this, _event, _window, cx| {
@@ -226,7 +243,7 @@ impl Render for DocumentationWindow {
                             .child(
                                 Button::new("tab-manual")
                                     .label("Manual Docs")
-                                    .small()
+                                    .icon(IconName::BookOpen)
                                     .when(current_category == DocCategory::Manual, |btn| btn.primary())
                                     .when(current_category != DocCategory::Manual, |btn| btn.ghost())
                                     .on_click(cx.listener(|this, _event, _window, cx| {
@@ -243,13 +260,92 @@ impl Render for DocumentationWindow {
                     .overflow_hidden()
                     .child({
                         let content = match current_category {
-                            DocCategory::Engine => self.render_engine_docs(window, cx, &theme, sidebar_bg, border, bg, fg, muted_fg, breadcrumb_parts).into_any_element(),
-                            DocCategory::Project => self.render_project_docs(window, cx, &theme, sidebar_bg, border, bg).into_any_element(),
-                            DocCategory::Manual => self.render_manual_docs(window, cx, &theme, sidebar_bg, border, bg, fg).into_any_element(),
+                            DocCategory::Engine => self.render_engine_docs(window, cx).into_any_element(),
+                            DocCategory::Project => self.render_project_docs(window, cx).into_any_element(),
+                            DocCategory::Manual => self.render_manual_docs(window, cx).into_any_element(),
                         };
                         content
                     })
             )
+            .when(self.show_new_file_dialog, |this| {
+                this.child(
+                    // Modal overlay
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui::black().opacity(0.5))
+                        .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, _, cx| {
+                            this.show_new_file_dialog = false;
+                            cx.notify();
+                        }))
+                        .child(
+                            // Dialog content
+                            div()
+                                .w(px(400.0))
+                                .bg(theme.background)
+                                .border_1()
+                                .border_color(theme.border)
+                                .rounded_lg()
+                                .shadow_lg()
+                                .p_4()
+                                .on_mouse_down(gpui::MouseButton::Left, |event, _phase, cx| {
+                                    // Stop event propagation to prevent closing dialog when clicking inside
+                                    cx.stop_propagation();
+                                })
+                                .child(
+                                    v_flex()
+                                        .gap_4()
+                                        .child(
+                                            div()
+                                                .text_lg()
+                                                .font_weight(gpui::FontWeight::BOLD)
+                                                .text_color(theme.foreground)
+                                                .child("Create New Documentation File")
+                                        )
+                                        .child(
+                                            TextInput::new(&self.new_file_input_state)
+                                                .w_full()
+                                                .appearance(true)
+                                                .bordered(true)
+                                        )
+                                        .child(
+                                            h_flex()
+                                                .gap_2()
+                                                .justify_end()
+                                                .child(
+                                                    Button::new("cancel-new-file")
+                                                        .label("Cancel")
+                                                        .ghost()
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.show_new_file_dialog = false;
+                                                            this.new_file_name.clear();
+                                                            cx.notify();
+                                                        }))
+                                                )
+                                                .child(
+                                                    Button::new("create-new-file")
+                                                        .label("Create")
+                                                        .primary()
+                                                        .on_click(cx.listener(|this, _, window, cx| {
+                                                            if !this.new_file_name.is_empty() {
+                                                                let file_name = this.new_file_name.clone();
+                                                                if let Err(e) = this.manual_docs.create_new_file(file_name, window, cx) {
+                                                                    eprintln!("Failed to create file: {}", e);
+                                                                }
+                                                                this.show_new_file_dialog = false;
+                                                                this.new_file_name.clear();
+                                                                cx.notify();
+                                                            }
+                                                        }))
+                                                )
+                                        )
+                                )
+                        )
+                )
+            })
     }
 }
 
@@ -262,18 +358,20 @@ impl DocumentationWindow {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        theme: &ui::ThemeColor,
-        sidebar_bg: gpui::Hsla,
-        border: gpui::Hsla,
-        bg: gpui::Hsla,
-        fg: gpui::Hsla,
-        muted_fg: gpui::Hsla,
-        breadcrumb_parts: Option<Vec<String>>,
     ) -> impl IntoElement {
+        let breadcrumb_parts = self.render_breadcrumbs();
+        
         let visible_items: Vec<_> = self.engine_docs.flat_visible_items.iter()
             .map(|&idx| self.engine_docs.tree_items[idx].clone())
             .collect();
         let markdown = self.engine_docs.markdown_content.clone();
+        
+        // Collect tree nodes first
+        let tree_nodes: Vec<_> = visible_items.iter().map(|node| {
+            self.render_tree_node(node, cx)
+        }).collect();
+        
+        let theme = cx.theme();
 
         h_resizable("docs-horizontal", self.sidebar_resizable_state.clone())
             .child(
@@ -282,53 +380,68 @@ impl DocumentationWindow {
                     .child(
                         v_flex()
                             .size_full()
-                            .bg(sidebar_bg)
+                            .bg(theme.sidebar.opacity(0.5))
                             .border_r_1()
-                            .border_color(border)
+                            .border_color(theme.border.opacity(0.5))
                             .child(
-                                // Search bar - FULL WIDTH
+                                // Professional sidebar header
                                 div()
                                     .w_full()
-                                    .p_2()
+                                    .px_4()
+                                    .py_3()
+                                    .bg(theme.background.opacity(0.3))
                                     .border_b_1()
-                                    .border_color(border)
+                                    .border_color(theme.border.opacity(0.5))
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(
+                                                Icon::new(IconName::Code)
+                                                    .size_4()
+                                                    .text_color(theme.accent)
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                    .text_color(theme.foreground)
+                                                    .child("API Reference")
+                                            )
+                                    )
+                            )
+                            .child(
+                                // Search bar with modern styling
+                                div()
+                                    .w_full()
+                                    .p_3()
+                                    .border_b_1()
+                                    .border_color(theme.border.opacity(0.5))
                                     .child(
                                         TextInput::new(&self.engine_docs.search_input_state)
                                             .w_full()
-                                            .prefix(Icon::new(IconName::Search).size_4())
+                                            .prefix(
+                                                Icon::new(IconName::Search)
+                                                    .size_4()
+                                                    .text_color(theme.muted_foreground)
+                                            )
                                             .appearance(true)
                                             .bordered(true)
                                     )
                             )
                             .child(
-                                // Tree items with scroll
+                                // Tree items with proper scroll
                                 div()
+                                    .id("engine-tree-scroll")
                                     .flex_1()
-                                    .overflow_hidden()
+                                    .overflow_y_scroll()
                                     .child(
-                                        div()
-                                            .id("engine-tree-scroll")
-                                            .size_full()
-                                            .overflow_y_scroll()
-                                            .child(
-                                                v_flex()
-                                                    .w_full()
-                                                    .py_2()
-                                                    .px_2()
-                                                    .font_family("monospace")
-                                                    .font(gpui::Font {
-                                                        family: "JetBrains Mono".to_string().into(),
-                                                        weight: gpui::FontWeight::NORMAL,
-                                                        style: gpui::FontStyle::Normal,
-                                                        features: gpui::FontFeatures::default(),
-                                                        fallbacks: Some(gpui::FontFallbacks::from_fonts(vec!["monospace".to_string()])),
-                                                    })
-                                                    .children(
-                                                        visible_items.iter().map(|node| {
-                                                            self.render_tree_node(node, cx)
-                                                        })
-                                                    )
-                                            )
+                                        v_flex()
+                                            .w_full()
+                                            .p_2()
+                                            .gap_0p5()
+                                            .font_family("monospace")
+                                            .children(tree_nodes)
                                     )
                             )
                     )
@@ -338,71 +451,78 @@ impl DocumentationWindow {
                     .child(
                         div()
                             .size_full()
-                            .bg(bg)
+                            .bg(theme.background)
                             .child(
                                 div()
                                     .id("engine-content-scroll")
                                     .size_full()
                                     .overflow_y_scroll()
                                     .child(
-                                        div()
+                                        v_flex()
                                             .w_full()
-                                            .max_w(px(1200.0))
-                                            .mx_auto()
                                             .child(
-                                                v_flex()
-                                                    .w_full()
-                                                    .gap_4()
-                                                    .when_some(breadcrumb_parts, |this, parts| {
-                                                        this.child(
-                                                            div()
-                                                                .pt_6()
-                                                                .px_8()
-                                                                .border_b_1()
-                                                                .border_color(border)
-                                                                .pb_3()
-                                                                .child({
-                                                                    let mut crumbs = h_flex().gap_2().items_center();
-                                                                    crumbs = crumbs.child(
-                                                                        div()
-                                                                            .text_sm()
-                                                                            .text_color(muted_fg)
-                                                                            .child("Documentation")
-                                                                    );
-                                                                    for part in parts.iter() {
-                                                                        crumbs = crumbs
-                                                                            .child(
-                                                                                div()
-                                                                                    .text_sm()
-                                                                                    .text_color(muted_fg)
-                                                                                    .child("/")
-                                                                            )
-                                                                            .child(
-                                                                                div()
-                                                                                    .text_sm()
-                                                                                    .text_color(fg)
-                                                                                    .child(part.clone())
-                                                                            );
-                                                                    }
-                                                                    crumbs
-                                                                })
-                                                        )
-                                                    })
-                                                    .child(
+                                                // Breadcrumbs with modern styling
+                                                {
+                                                    if let Some(parts) = breadcrumb_parts {
                                                         div()
                                                             .w_full()
                                                             .px_8()
-                                                            .pt_6()
-                                                            .pb_8()
-                                                            .child(
-                                                                TextView::markdown(
-                                                                    "docs-markdown",
-                                                                    markdown,
-                                                                    window,
-                                                                    cx,
-                                                                )
-                                                                .selectable()
-                                                            )
+                                                            .py_4()
+                                                            .border_b_1()
+                                                            .border_color(theme.border)
+                                                            .bg(theme.sidebar.opacity(0.3))
+                                                            .child({
+                                                                let mut crumbs = h_flex().gap_2().items_center();
+                                                                crumbs = crumbs
+                                                                    .child(
+                                                                        Icon::new(IconName::BookOpen)
+                                                                            .size_4()
+                                                                            .text_color(theme.accent)
+                                                                    )
+                                                                    .child(
+                                                                        div()
+                                                                            .text_sm()
+                                                                            .text_color(theme.muted_foreground)
+                                                                            .child("Documentation")
+                                                                    );
+                                                                for part in parts.iter() {
+                                                                    crumbs = crumbs
+                                                                        .child(
+                                                                            Icon::new(IconName::ChevronRight)
+                                                                                .size_3()
+                                                                                .text_color(theme.muted_foreground)
+                                                                        )
+                                                                        .child(
+                                                                            div()
+                                                                                .text_sm()
+                                                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                                                .text_color(theme.foreground)
+                                                                                .child(part.clone())
+                                                                        );
+                                                                }
+                                                                crumbs
+                                                            })
+                                                            .into_any_element()
+                                                    } else {
+                                                        div().into_any_element()
+                                                    }
+                                                }
+                                            )
+                                            .child(
+                                                div()
+                                                    .w_full()
+                                                    .max_w(px(1200.0))
+                                                    .mx_auto()
+                                                    .px_8()
+                                                    .py_8()
+                                                    .child(
+                                                        TextView::markdown(
+                                                            "docs-markdown",
+                                                            markdown,
+                                                            window,
+                                                            cx,
+                                                        )
+                                                        .selectable()
                                                     )
                                             )
                                     )
@@ -415,12 +535,19 @@ impl DocumentationWindow {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        theme: &ui::ThemeColor,
-        sidebar_bg: gpui::Hsla,
-        border: gpui::Hsla,
-        bg: gpui::Hsla,
     ) -> impl IntoElement {
         let markdown = self.project_docs.markdown_content.clone();
+
+        let visible_items: Vec<_> = self.project_docs.flat_visible_items.iter()
+            .map(|&idx| self.project_docs.tree_items[idx].clone())
+            .collect();
+
+        // Collect tree nodes first
+        let tree_nodes: Vec<_> = visible_items.iter().map(|node| {
+            self.render_project_tree_node(node, cx)
+        }).collect();
+
+        let theme = cx.theme();
 
         h_resizable("docs-horizontal", self.sidebar_resizable_state.clone())
             .child(
@@ -429,32 +556,68 @@ impl DocumentationWindow {
                     .child(
                         v_flex()
                             .size_full()
-                            .bg(sidebar_bg)
+                            .bg(theme.sidebar.opacity(0.5))
                             .border_r_1()
-                            .border_color(border)
+                            .border_color(theme.border.opacity(0.5))
                             .child(
+                                // Professional sidebar header
                                 div()
                                     .w_full()
-                                    .p_2()
+                                    .px_4()
+                                    .py_3()
+                                    .bg(theme.background.opacity(0.3))
                                     .border_b_1()
-                                    .border_color(border)
+                                    .border_color(theme.border.opacity(0.5))
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(
+                                                Icon::new(IconName::Folder)
+                                                    .size_4()
+                                                    .text_color(theme.accent)
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                    .text_color(theme.foreground)
+                                                    .child("Project API")
+                                            )
+                                    )
+                            )
+                            .child(
+                                // Search bar with modern styling
+                                div()
+                                    .w_full()
+                                    .p_3()
+                                    .border_b_1()
+                                    .border_color(theme.border.opacity(0.5))
                                     .child(
                                         TextInput::new(&self.project_docs.search_input_state)
                                             .w_full()
-                                            .prefix(Icon::new(IconName::Search).size_4())
+                                            .prefix(
+                                                Icon::new(IconName::Search)
+                                                    .size_4()
+                                                    .text_color(theme.muted_foreground)
+                                            )
                                             .appearance(true)
                                             .bordered(true)
                                     )
                             )
                             .child(
+                                // Tree items with proper scroll
                                 div()
+                                    .id("project-tree-scroll")
                                     .flex_1()
-                                    .p_4()
+                                    .overflow_y_scroll()
                                     .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(theme.muted_foreground)
-                                            .child("Project documentation will be listed here.")
+                                        v_flex()
+                                            .w_full()
+                                            .p_2()
+                                            .gap_0p5()
+                                            .font_family("monospace")
+                                            .children(tree_nodes)
                                     )
                             )
                     )
@@ -464,7 +627,7 @@ impl DocumentationWindow {
                     .child(
                         div()
                             .size_full()
-                            .bg(bg)
+                            .bg(theme.background)
                             .child(
                                 div()
                                     .id("project-content-scroll")
@@ -497,15 +660,17 @@ impl DocumentationWindow {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        theme: &ui::ThemeColor,
-        sidebar_bg: gpui::Hsla,
-        border: gpui::Hsla,
-        bg: gpui::Hsla,
-        fg: gpui::Hsla,
     ) -> impl IntoElement {
         let visible_files: Vec<_> = self.manual_docs.visible_entries.iter()
             .map(|&idx| self.manual_docs.file_tree[idx].clone())
             .collect();
+        
+        // Render file entries before getting theme
+        let file_entries: Vec<AnyElement> = visible_files.into_iter().map(|entry| {
+            self.render_file_entry_inline(&entry, cx)
+        }).collect();
+        
+        let theme = cx.theme();
 
         h_resizable("docs-horizontal", self.sidebar_resizable_state.clone())
             .child(
@@ -515,9 +680,9 @@ impl DocumentationWindow {
                     .child(
                         v_flex()
                             .size_full()
-                            .bg(sidebar_bg)
+                            .bg(theme.sidebar)
                             .border_r_1()
-                            .border_color(border)
+                            .border_color(theme.border)
                             .child(
                                 // Toolbar
                                 h_flex()
@@ -527,12 +692,12 @@ impl DocumentationWindow {
                                     .px_2()
                                     .gap_2()
                                     .border_b_1()
-                                    .border_color(border)
+                                    .border_color(theme.border)
                                     .child(
                                         div()
                                             .text_sm()
                                             .font_semibold()
-                                            .text_color(fg)
+                                            .text_color(theme.foreground)
                                             .child("Files")
                                     )
                                     .child(div().flex_1())
@@ -562,11 +727,7 @@ impl DocumentationWindow {
                                                 v_flex()
                                                     .w_full()
                                                     .py_2()
-                                                    .children(
-                                                        visible_files.iter().map(|entry| {
-                                                            self.render_file_entry(entry, cx, theme)
-                                                        })
-                                                    )
+                                                    .children(file_entries)
                                             )
                                     )
                             )
@@ -578,7 +739,7 @@ impl DocumentationWindow {
                     .child(
                         v_flex()
                             .size_full()
-                            .bg(bg)
+                            .bg(theme.background)
                             .child(
                                 // Toolbar with view mode toggle
                                 h_flex()
@@ -588,12 +749,12 @@ impl DocumentationWindow {
                                     .px_4()
                                     .gap_2()
                                     .border_b_1()
-                                    .border_color(border)
+                                    .border_color(theme.border)
                                     .child(
                                         div()
                                             .text_sm()
                                             .font_semibold()
-                                            .text_color(fg)
+                                            .text_color(theme.foreground)
                                             .child({
                                                 let file_name = self.manual_docs.selected_file
                                                     .as_ref()
@@ -643,9 +804,9 @@ impl DocumentationWindow {
                                             .icon(IconName::Check)
                                             .ghost()
                                             .small()
-                                            .tooltip("Save File")
-                                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                                let _ = this.manual_docs.save_current_file();
+                                            .tooltip("Save File (updates preview)")
+                                            .on_click(cx.listener(|this, _event, window, cx| {
+                                                let _ = this.manual_docs.save_current_file(window, cx);
                                                 cx.notify();
                                             }))
                                     )
@@ -659,9 +820,9 @@ impl DocumentationWindow {
                                     .overflow_hidden()
                                     .child({
                                         let content = match view_mode {
-                                            ViewMode::Editor => self.render_editor_only(window, cx, bg).into_any_element(),
-                                            ViewMode::Preview => self.render_preview_only(window, cx, bg).into_any_element(),
-                                            ViewMode::Split => self.render_split_view(window, cx, bg, border).into_any_element(),
+                                            ViewMode::Editor => self.render_editor_only(window, cx, gpui::transparent_black()).into_any_element(),
+                                            ViewMode::Preview => self.render_preview_only(window, cx, gpui::transparent_black()).into_any_element(),
+                                            ViewMode::Split => self.render_split_view(window, cx, gpui::transparent_black(), gpui::transparent_black()).into_any_element(),
                                         };
                                         content
                                     })
@@ -670,24 +831,30 @@ impl DocumentationWindow {
             )
     }
 
-    fn render_editor_only(&mut self, _window: &mut Window, _cx: &mut Context<Self>, bg: gpui::Hsla) -> impl IntoElement {
+    fn render_editor_only(&mut self, _window: &mut Window, _cx: &mut Context<Self>, _bg: gpui::Hsla) -> impl IntoElement {
+        let theme = _cx.theme();
+
         div()
             .size_full()
-            .bg(bg)
+            .bg(theme.background)
             .p_4()
             .child(
                 TextInput::new(&self.manual_docs.editor_input_state)
+                    .w_full()
+                    .h_full()
                     .appearance(true)
                     .bordered(true)
             )
     }
 
-    fn render_preview_only(&mut self, window: &mut Window, cx: &mut Context<Self>, bg: gpui::Hsla) -> impl IntoElement {
+    fn render_preview_only(&mut self, window: &mut Window, cx: &mut Context<Self>, _bg: gpui::Hsla) -> impl IntoElement {
+        let theme = cx.theme();
         let markdown = self.manual_docs.markdown_preview.clone();
 
         div()
             .size_full()
-            .bg(bg)
+            .bg(theme.background)
+            .overflow_hidden()
             .child(
                 div()
                     .id("manual-preview-scroll")
@@ -708,13 +875,15 @@ impl DocumentationWindow {
                                     window,
                                     cx,
                                 )
+                                .debounce_ms(30)
                                 .selectable()
                             )
                     )
             )
     }
 
-    fn render_split_view(&mut self, window: &mut Window, cx: &mut Context<Self>, bg: gpui::Hsla, border: gpui::Hsla) -> impl IntoElement {
+    fn render_split_view(&mut self, window: &mut Window, cx: &mut Context<Self>, _bg: gpui::Hsla, _border: gpui::Hsla) -> impl IntoElement {
+        let theme = cx.theme();
         let markdown = self.manual_docs.markdown_preview.clone();
 
         h_flex()
@@ -723,12 +892,14 @@ impl DocumentationWindow {
                 // Editor (left)
                 div()
                     .flex_1()
-                    .bg(bg)
+                    .size_full()
+                    .bg(theme.background)
                     .border_r_1()
-                    .border_color(border)
-                    .p_4()
+                    .border_color(theme.border)
                     .child(
                         TextInput::new(&self.manual_docs.editor_input_state)
+                            .w_full()
+                            .h_full()
                             .appearance(true)
                             .bordered(true)
                     )
@@ -736,36 +907,39 @@ impl DocumentationWindow {
             .child(
                 // Preview (right)
                 div()
+                    .id("manual-preview-split-scroll")
                     .flex_1()
-                    .bg(bg)
+                    .size_full()
+                    .bg(theme.background)
+                    .overflow_y_scroll()
                     .child(
                         div()
-                            .id("manual-preview-split-scroll")
-                            .size_full()
-                            .overflow_y_scroll()
+                            .w_full()
+                            .max_w(px(1200.0))
+                            .mx_auto()
+                            .px_8()
+                            .pt_6()
+                            .pb_8()
                             .child(
-                                div()
-                                    .w_full()
-                                    .max_w(px(1200.0))
-                                    .mx_auto()
-                                    .px_8()
-                                    .pt_6()
-                                    .pb_8()
-                                    .child(
-                                        TextView::markdown(
-                                            "manual-docs-preview-split",
-                                            markdown,
-                                            window,
-                                            cx,
-                                        )
-                                        .selectable()
-                                    )
+                                TextView::markdown(
+                                    "manual-docs-preview-split",
+                                    markdown,
+                                    window,
+                                    cx,
+                                )
+                                .debounce_ms(30)
+                                .selectable()
                             )
                     )
             )
     }
 
-    fn render_file_entry(&self, entry: &FileEntry, cx: &mut Context<Self>, theme: &ui::ThemeColor) -> AnyElement {
+    fn render_file_entry(&self, entry: &FileEntry, cx: &mut Context<Self>, _theme: &ui::ThemeColor) -> AnyElement {
+        self.render_file_entry_inline(entry, cx)
+    }
+    
+    fn render_file_entry_inline(&self, entry: &FileEntry, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
         let is_selected = self.manual_docs.selected_file.as_ref() == Some(&entry.path);
         let is_expanded = self.manual_docs.expanded_folders.contains(&entry.path);
         let indent = px(entry.depth as f32 * 16.0);
@@ -783,11 +957,11 @@ impl DocumentationWindow {
             .when(is_selected, |style| style.bg(theme.accent).shadow_sm())
             .when(!is_selected, |style| style.hover(|s| s.bg(theme.accent.opacity(0.08))))
             .cursor_pointer()
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, _, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, window, cx| {
                 if is_directory {
                     this.manual_docs.toggle_folder(path.clone());
                 } else {
-                    this.manual_docs.select_file(path.clone());
+                    this.manual_docs.select_file(path.clone(), window, cx);
                 }
                 cx.notify();
             }))
@@ -917,6 +1091,95 @@ impl DocumentationWindow {
                     .cursor_pointer()
                     .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, _, cx| {
                         this.engine_docs.load_content(&path_clone);
+                        cx.notify();
+                    }))
+                    .child(
+                        Icon::new(IconName::Code)
+                            .size_3p5()
+                            .text_color(if is_selected {
+                                theme.accent_foreground
+                            } else {
+                                theme.accent.opacity(0.7)
+                            })
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(if is_selected {
+                                theme.accent_foreground
+                            } else {
+                                theme.foreground.opacity(0.85)
+                            })
+                            .child(item_name.clone())
+                    )
+                    .into_any_element()
+            }
+        }
+    }
+
+    fn render_project_tree_node(&self, node: &ProjectTreeNode, cx: &mut Context<Self>) -> AnyElement {
+        match node {
+            ProjectTreeNode::Category { name, count, depth } => {
+                let is_expanded = self.project_docs.expanded_paths.contains(name);
+                let category_name = name.clone();
+                let indent = px(*depth as f32 * 16.0);
+                let id = SharedString::from(format!("category-{}", name));
+                let theme = cx.theme();
+
+                div()
+                    .id(id)
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .h(px(28.0))
+                    .pl(indent + px(8.0))
+                    .pr_3()
+                    .rounded_sm()
+                    .hover(|style| style.bg(theme.accent.opacity(0.08)))
+                    .cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                        this.project_docs.toggle_expansion(category_name.clone());
+                        cx.notify();
+                    }))
+                    .child(
+                        Icon::new(if is_expanded { IconName::ChevronDown } else { IconName::ChevronRight })
+                            .size_3p5()
+                            .text_color(theme.foreground.opacity(0.7))
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.foreground.opacity(0.9))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(format!("{} ({})", name, count))
+                    )
+                    .into_any_element()
+            }
+            ProjectTreeNode::Item { item_name, path, depth, .. } => {
+                let is_selected = self.project_docs.current_path.as_ref() == Some(path);
+                let path_clone = path.clone();
+                let indent = px(*depth as f32 * 16.0);
+                let id = SharedString::from(format!("project-item-{}", path.replace("::", "-")));
+                let theme = cx.theme();
+
+                div()
+                    .id(id)
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .h(px(28.0))
+                    .pl(indent + px(16.0))
+                    .pr_3()
+                    .rounded_sm()
+                    .when(is_selected, |style| {
+                        style.bg(theme.accent).shadow_sm()
+                    })
+                    .when(!is_selected, |style| {
+                        style.hover(|style| style.bg(theme.accent.opacity(0.08)))
+                    })
+                    .cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                        this.project_docs.load_content(&path_clone);
                         cx.notify();
                     }))
                     .child(

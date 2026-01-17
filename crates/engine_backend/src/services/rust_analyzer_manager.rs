@@ -76,8 +76,8 @@ impl RustAnalyzerManager {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
         let analyzer_path = Self::find_or_use_bundled_analyzer();
 
-        println!("🔧 Rust Analyzer Manager initialized");
-        println!("   Using: {:?}", analyzer_path);
+        tracing::debug!("🔧 Rust Analyzer Manager initialized");
+        tracing::debug!("   Using: {:?}", analyzer_path);
 
         Self {
             analyzer_path,
@@ -115,11 +115,11 @@ impl RustAnalyzerManager {
                     let version_output = String::from_utf8_lossy(&output.stdout);
                     // Check if this is a rustup proxy by looking for the error message
                     if version_output.contains("Unknown binary") || version_output.contains("official toolchain") {
-                        println!("⚠️  Found rustup proxy, but rust-analyzer component not installed");
+                        tracing::debug!("⚠️  Found rustup proxy, but rust-analyzer component not installed");
                         continue;
                     }
-                    println!("✓ Found system rust-analyzer: {}", candidate);
-                    println!("   Version: {}", version_output.trim());
+                    tracing::debug!("✓ Found system rust-analyzer: {}", candidate);
+                    tracing::debug!("   Version: {}", version_output.trim());
                     return PathBuf::from(candidate);
                 }
             }
@@ -129,7 +129,7 @@ impl RustAnalyzerManager {
         if let Ok(home) = std::env::var("CARGO_HOME") {
             let cargo_bin = PathBuf::from(home).join("bin").join("rust-analyzer.exe");
             if cargo_bin.exists() {
-                println!("✓ Found rust-analyzer in cargo bin: {:?}", cargo_bin);
+                tracing::debug!("✓ Found rust-analyzer in cargo bin: {:?}", cargo_bin);
                 return cargo_bin;
             }
         }
@@ -137,7 +137,7 @@ impl RustAnalyzerManager {
         if let Ok(home) = std::env::var("USERPROFILE") {
             let cargo_bin = PathBuf::from(home).join(".cargo").join("bin").join("rust-analyzer.exe");
             if cargo_bin.exists() {
-                println!("✓ Found rust-analyzer in user cargo bin: {:?}", cargo_bin);
+                tracing::debug!("✓ Found rust-analyzer in user cargo bin: {:?}", cargo_bin);
                 return cargo_bin;
             }
         }
@@ -145,13 +145,13 @@ impl RustAnalyzerManager {
         // Check engine deps directory
         let deps_path = Self::get_engine_deps_analyzer_path();
         if deps_path.exists() {
-            println!("✓ Found rust-analyzer in engine deps: {:?}", deps_path);
+            tracing::debug!("✓ Found rust-analyzer in engine deps: {:?}", deps_path);
             return deps_path;
         }
 
         // Fallback to rust-analyzer command (may not exist)
-        println!("⚠️  rust-analyzer not found in standard locations");
-        println!("   Will attempt to use 'rust-analyzer' from PATH");
+        tracing::debug!("⚠️  rust-analyzer not found in standard locations");
+        tracing::debug!("   Will attempt to use 'rust-analyzer' from PATH");
         PathBuf::from("rust-analyzer")
     }
 
@@ -177,14 +177,14 @@ impl RustAnalyzerManager {
                             let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
                             let path = PathBuf::from(path_str);
                             if path.exists() {
-                                println!("✓ Found rust-analyzer via rustup: {:?}", path);
+                                tracing::debug!("✓ Found rust-analyzer via rustup: {:?}", path);
                                 return Some(path);
                             }
                         }
                     }
                 } else {
-                    println!("ℹ️  rust-analyzer component not installed via rustup");
-                    println!("   You can install it with: rustup component add rust-analyzer");
+                    tracing::debug!("ℹ️  rust-analyzer component not installed via rustup");
+                    tracing::debug!("   You can install it with: rustup component add rust-analyzer");
                 }
             }
         }
@@ -213,7 +213,7 @@ impl RustAnalyzerManager {
 
     /// Download and install rust-analyzer to the engine deps directory
     fn install_rust_analyzer_to_deps() -> Result<PathBuf> {
-        println!("📦 Attempting to install rust-analyzer...");
+        tracing::debug!("📦 Attempting to install rust-analyzer...");
 
         // First, try to install via rustup (easiest and most reliable)
         if let Ok(installed_path) = Self::install_rust_analyzer_via_rustup() {
@@ -221,7 +221,7 @@ impl RustAnalyzerManager {
         }
 
         // If rustup installation fails, fall back to manual download
-        println!("   Rustup installation not available, trying manual download...");
+        tracing::debug!("   Rustup installation not available, trying manual download...");
         Self::download_rust_analyzer_binary()
     }
 
@@ -229,7 +229,7 @@ impl RustAnalyzerManager {
     fn install_rust_analyzer_via_rustup() -> Result<PathBuf> {
         let rustup_cmd = if cfg!(windows) { "rustup.exe" } else { "rustup" };
         
-        println!("   Trying to install via rustup...");
+        tracing::debug!("   Trying to install via rustup...");
         
         // Try to install the rust-analyzer component
         let output = Command::new(rustup_cmd)
@@ -242,7 +242,7 @@ impl RustAnalyzerManager {
             return Err(anyhow!("Rustup component add failed: {}", stderr));
         }
 
-        println!("✓ Installed rust-analyzer component via rustup");
+        tracing::debug!("✓ Installed rust-analyzer component via rustup");
 
         // Now get the path to the installed binary
         let output = Command::new(rustup_cmd)
@@ -265,8 +265,8 @@ impl RustAnalyzerManager {
         if let Ok(output) = Command::new(&path).arg("--version").output() {
             if output.status.success() {
                 let version = String::from_utf8_lossy(&output.stdout);
-                println!("✓ rust-analyzer installed and verified via rustup!");
-                println!("   Version: {}", version.trim());
+                tracing::debug!("✓ rust-analyzer installed and verified via rustup!");
+                tracing::debug!("   Version: {}", version.trim());
                 return Ok(path);
             }
         }
@@ -276,14 +276,14 @@ impl RustAnalyzerManager {
 
     /// Download rust-analyzer binary directly from GitHub
     fn download_rust_analyzer_binary() -> Result<PathBuf> {
-        println!("   Downloading rust-analyzer to engine deps directory...");
+        tracing::debug!("   Downloading rust-analyzer to engine deps directory...");
 
         let deps_path = Self::get_engine_deps_analyzer_path();
         let deps_dir = deps_path.parent().ok_or_else(|| anyhow!("Invalid deps path"))?;
 
         // Create deps directory if it doesn't exist
         fs::create_dir_all(deps_dir)?;
-        println!("   Created deps directory: {:?}", deps_dir);
+        tracing::debug!("   Created deps directory: {:?}", deps_dir);
 
         // Determine platform and download URL
         let (platform, extension) = if cfg!(target_os = "windows") {
@@ -301,8 +301,8 @@ impl RustAnalyzerManager {
             platform, extension
         );
 
-        println!("   Downloading from: {}", url);
-        println!("   This may take a moment...");
+        tracing::debug!("   Downloading from: {}", url);
+        tracing::debug!("   This may take a moment...");
 
         // Download using curl or wget (cross-platform)
         let download_result = if cfg!(windows) {
@@ -323,7 +323,7 @@ impl RustAnalyzerManager {
 
         match download_result {
             Ok(output) if output.status.success() => {
-                println!("✓ Downloaded rust-analyzer successfully");
+                tracing::debug!("✓ Downloaded rust-analyzer successfully");
 
                 // Make executable on Unix-like systems
                 #[cfg(unix)]
@@ -332,15 +332,15 @@ impl RustAnalyzerManager {
                     let mut perms = fs::metadata(&deps_path)?.permissions();
                     perms.set_mode(0o755);
                     fs::set_permissions(&deps_path, perms)?;
-                    println!("✓ Made rust-analyzer executable");
+                    tracing::debug!("✓ Made rust-analyzer executable");
                 }
 
                 // Verify the downloaded file works
                 if let Ok(output) = Command::new(&deps_path).arg("--version").output() {
                     if output.status.success() {
                         let version = String::from_utf8_lossy(&output.stdout);
-                        println!("✓ rust-analyzer installed successfully!");
-                        println!("   Version: {}", version.trim());
+                        tracing::debug!("✓ rust-analyzer installed successfully!");
+                        tracing::debug!("   Version: {}", version.trim());
                         return Ok(deps_path);
                     }
                 }
@@ -357,7 +357,7 @@ impl RustAnalyzerManager {
 
     /// Start rust-analyzer for the given workspace
     pub fn start(&mut self, workspace_root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        println!("🚀 Starting rust-analyzer for: {:?}", workspace_root);
+        tracing::debug!("🚀 Starting rust-analyzer for: {:?}", workspace_root);
 
         self.workspace_root = Some(workspace_root.clone());
         self.status = AnalyzerStatus::Starting;
@@ -401,7 +401,7 @@ impl RustAnalyzerManager {
 
             match spawn_result {
                 Ok(Ok(())) => {
-                    println!("✓ rust-analyzer process spawned successfully");
+                    tracing::debug!("✓ rust-analyzer process spawned successfully");
 
                     // Send initialize request in a background thread
                     let workspace_root_for_init = workspace_root.clone();
@@ -415,7 +415,7 @@ impl RustAnalyzerManager {
                             stdin_arc_for_init,
                             request_id_arc_for_init,
                         ) {
-                            eprintln!("❌ Failed to send initialize request: {}", e);
+                            tracing::error!("❌ Failed to send initialize request: {}", e);
                             let _ = progress_tx_for_init.send(ProgressUpdate::Error(format!("Init failed: {}", e)));
                         }
                         // Note: We removed monitor_progress() call here
@@ -438,7 +438,7 @@ impl RustAnalyzerManager {
                     });
                 }
                 Ok(Err(e)) => {
-                    eprintln!("❌ Failed to spawn rust-analyzer: {}", e);
+                    tracing::error!("❌ Failed to spawn rust-analyzer: {}", e);
                     let error_msg = format!("Failed to spawn: {}", e);
                     let _ = manager.update(cx, |manager, cx| {
                         manager.status = AnalyzerStatus::Error(error_msg.clone());
@@ -447,7 +447,7 @@ impl RustAnalyzerManager {
                     });
                 }
                 Err(e) => {
-                    eprintln!("❌ Thread panicked: {:?}", e);
+                    tracing::error!("❌ Thread panicked: {:?}", e);
                     let _ = manager.update(cx, |manager, cx| {
                         manager.status = AnalyzerStatus::Error("Thread panic".to_string());
                         cx.emit(AnalyzerEvent::Error("Thread panic".to_string()));
@@ -466,9 +466,9 @@ impl RustAnalyzerManager {
         progress_tx: Sender<ProgressUpdate>,
         pending_requests: Arc<Mutex<HashMap<i64, flume::Sender<serde_json::Value>>>>,
     ) -> Result<()> {
-        println!("Spawning rust-analyzer process...");
-        println!("  Binary: {:?}", analyzer_path);
-        println!("  Workspace: {:?}", workspace_root);
+        tracing::debug!("Spawning rust-analyzer process...");
+        tracing::debug!("  Binary: {:?}", analyzer_path);
+        tracing::debug!("  Workspace: {:?}", workspace_root);
 
         let spawn_result = Command::new(analyzer_path)
             .current_dir(workspace_root)
@@ -480,13 +480,13 @@ impl RustAnalyzerManager {
         let mut child = match spawn_result {
             Ok(child) => child,
             Err(e) => {
-                eprintln!("❌ Failed to spawn rust-analyzer: {}", e);
-                eprintln!("   Attempting to install rust-analyzer to engine deps...");
+                tracing::error!("❌ Failed to spawn rust-analyzer: {}", e);
+                tracing::error!("   Attempting to install rust-analyzer to engine deps...");
 
                 // Try to install rust-analyzer
                 match Self::install_rust_analyzer_to_deps() {
                     Ok(installed_path) => {
-                        println!("✓ Successfully installed rust-analyzer, retrying spawn...");
+                        tracing::debug!("✓ Successfully installed rust-analyzer, retrying spawn...");
 
                         // Retry spawning with the newly installed analyzer
                         Command::new(&installed_path)
@@ -498,7 +498,7 @@ impl RustAnalyzerManager {
                             .map_err(|e| anyhow!("Failed to spawn after installation: {}", e))?
                     }
                     Err(install_err) => {
-                        eprintln!("❌ Failed to install rust-analyzer: {}", install_err);
+                        tracing::error!("❌ Failed to install rust-analyzer: {}", install_err);
                         return Err(anyhow!("Failed to spawn and install: spawn error: {}, install error: {}", e, install_err));
                     }
                 }
@@ -506,7 +506,7 @@ impl RustAnalyzerManager {
         };
 
         let pid = child.id();
-        println!("✓ rust-analyzer process spawned (PID: {})", pid);
+        tracing::debug!("✓ rust-analyzer process spawned (PID: {})", pid);
 
         // Take stdin for our use
         let stdin = child.stdin.take().ok_or_else(|| anyhow!("Failed to take stdin"))?;
@@ -516,9 +516,9 @@ impl RustAnalyzerManager {
             thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines().flatten() {
-                    eprintln!("[rust-analyzer stderr] {}", line);
+                    tracing::error!("[rust-analyzer stderr] {}", line);
                 }
-                eprintln!("❌ rust-analyzer stderr stream ended");
+                tracing::error!("❌ rust-analyzer stderr stream ended");
             });
         }
 
@@ -579,7 +579,7 @@ impl RustAnalyzerManager {
                         }
                     }
                 }
-                eprintln!("❌ rust-analyzer stdout stream ended");
+                tracing::error!("❌ rust-analyzer stdout stream ended");
             });
         }
 
@@ -594,11 +594,11 @@ impl RustAnalyzerManager {
         thread::spawn(move || {
             match child.wait() {
                 Ok(status) => {
-                    println!("❌ rust-analyzer exited with status: {:?}", status);
+                    tracing::debug!("❌ rust-analyzer exited with status: {:?}", status);
                     let _ = progress_tx_exit.send(ProgressUpdate::ProcessExited(status));
                 }
                 Err(e) => {
-                    eprintln!("❌ Failed to wait for rust-analyzer: {}", e);
+                    tracing::error!("❌ Failed to wait for rust-analyzer: {}", e);
                     let _ = progress_tx_exit.send(ProgressUpdate::Error(format!("Wait failed: {}", e)));
                 }
             }
@@ -626,7 +626,7 @@ impl RustAnalyzerManager {
             format!("file://{}", workspace_str)
         };
 
-        println!("  Using workspace URI: {}", uri);
+        tracing::debug!("  Using workspace URI: {}", uri);
 
         let mut req_id = request_id_arc.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
         *req_id += 1;
@@ -687,7 +687,7 @@ impl RustAnalyzerManager {
             stdin.write_all(message.as_bytes())?;
             stdin.flush()?;
 
-            println!("✓ Sent initialize request to rust-analyzer");
+            tracing::debug!("✓ Sent initialize request to rust-analyzer");
 
             // Send initialized notification
             let initialized_notification = json!({
@@ -702,7 +702,7 @@ impl RustAnalyzerManager {
             stdin.write_all(message.as_bytes())?;
             stdin.flush()?;
 
-            println!("✓ Sent initialized notification");
+            tracing::debug!("✓ Sent initialized notification");
         } else {
             return Err(anyhow!("stdin not available"));
         }
@@ -789,6 +789,12 @@ impl RustAnalyzerManager {
                                 if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
                                     let mut diagnostics = Vec::new();
                                     
+                                    // Log first few raw diagnostics to understand their structure
+                                    if !diagnostics_array.is_empty() {
+                                        tracing::debug!("📋 Raw diagnostic from rust-analyzer: {}", 
+                                            serde_json::to_string_pretty(&diagnostics_array[0]).unwrap_or_default());
+                                    }
+                                    
                                     for diag in diagnostics_array {
                                         if let (Some(range), Some(message)) = (
                                             diag.get("range"),
@@ -801,6 +807,15 @@ impl RustAnalyzerManager {
                                                 let line = start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1;
                                                 let column = start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1;
                                                 
+                                                // Extract end position
+                                                let (end_line, end_column) = if let Some(end) = range.get("end") {
+                                                    let el = end.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1;
+                                                    let ec = end.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1;
+                                                    (Some(el), Some(ec))
+                                                } else {
+                                                    (None, None)
+                                                };
+                                                
                                                 let severity = match severity_num {
                                                     1 => DiagnosticSeverity::Error,
                                                     2 => DiagnosticSeverity::Warning,
@@ -811,14 +826,174 @@ impl RustAnalyzerManager {
                                                 
                                                 let file_path = uri.trim_start_matches("file:///").replace("%20", " ");
                                                 
+                                                // Extract code from diagnostic
+                                                let code = diag.get("code").and_then(|c| {
+                                                    if c.is_string() {
+                                                        c.as_str().map(|s| s.to_string())
+                                                    } else if c.is_number() {
+                                                        c.as_i64().map(|n| n.to_string())
+                                                    } else {
+                                                        None
+                                                    }
+                                                });
+                                                
+                                                // Extract code actions from the diagnostic's data field
+                                                // rust-analyzer stores quick fix info here
+                                                let mut code_actions = Vec::new();
+                                                if let Some(data) = diag.get("data") {
+                                                    tracing::debug!("📋 Diagnostic data: {:?}", data);
+                                                    // rust-analyzer may include fix suggestions in data
+                                                    if let Some(fixes) = data.get("fixes").and_then(|f| f.as_array()) {
+                                                        tracing::debug!("🔧 Found {} fixes in diagnostic data", fixes.len());
+                                                        for fix in fixes {
+                                                            if let Some(title) = fix.get("title").and_then(|t| t.as_str()) {
+                                                                tracing::debug!("  📝 Fix: {}", title);
+                                                                let mut edits = Vec::new();
+                                                                
+                                                                // Extract text edits from the fix
+                                                                if let Some(edit) = fix.get("edit") {
+                                                                    if let Some(changes) = edit.get("changes").and_then(|c| c.as_object()) {
+                                                                        for (edit_uri, edit_array) in changes {
+                                                                            if let Some(edit_list) = edit_array.as_array() {
+                                                                                let edit_file = edit_uri.trim_start_matches("file:///").replace("%20", " ");
+                                                                                for text_edit in edit_list {
+                                                                                    if let (Some(edit_range), Some(new_text)) = (
+                                                                                        text_edit.get("range"),
+                                                                                        text_edit.get("newText").and_then(|t| t.as_str())
+                                                                                    ) {
+                                                                                        if let (Some(edit_start), Some(edit_end)) = (
+                                                                                            edit_range.get("start"),
+                                                                                            edit_range.get("end")
+                                                                                        ) {
+                                                                                            edits.push(ui::diagnostics::TextEdit {
+                                                                                                file_path: edit_file.clone(),
+                                                                                                start_line: edit_start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1,
+                                                                                                start_column: edit_start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1,
+                                                                                                end_line: edit_end.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1,
+                                                                                                end_column: edit_end.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1,
+                                                                                                new_text: new_text.to_string(),
+                                                                                            });
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    // Also check documentChanges format
+                                                                    if let Some(doc_changes) = edit.get("documentChanges").and_then(|c| c.as_array()) {
+                                                                        for doc_change in doc_changes {
+                                                                            if let Some(text_doc) = doc_change.get("textDocument") {
+                                                                                let edit_file = text_doc.get("uri")
+                                                                                    .and_then(|u| u.as_str())
+                                                                                    .map(|u| u.trim_start_matches("file:///").replace("%20", " "))
+                                                                                    .unwrap_or_default();
+                                                                                
+                                                                                if let Some(edit_list) = doc_change.get("edits").and_then(|e| e.as_array()) {
+                                                                                    for text_edit in edit_list {
+                                                                                        if let (Some(edit_range), Some(new_text)) = (
+                                                                                            text_edit.get("range"),
+                                                                                            text_edit.get("newText").and_then(|t| t.as_str())
+                                                                                        ) {
+                                                                                            if let (Some(edit_start), Some(edit_end)) = (
+                                                                                                edit_range.get("start"),
+                                                                                                edit_range.get("end")
+                                                                                            ) {
+                                                                                                edits.push(ui::diagnostics::TextEdit {
+                                                                                                    file_path: edit_file.clone(),
+                                                                                                    start_line: edit_start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1,
+                                                                                                    start_column: edit_start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1,
+                                                                                                    end_line: edit_end.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1,
+                                                                                                    end_column: edit_end.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1,
+                                                                                                    new_text: new_text.to_string(),
+                                                                                                });
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                                
+                                                                if !edits.is_empty() {
+                                                                    code_actions.push(ui::diagnostics::CodeAction {
+                                                                        title: title.to_string(),
+                                                                        edits,
+                                                                    });
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                // Also extract code actions from relatedInformation
+                                                // rustc provides fix suggestions here for things like unused imports
+                                                // Format: relatedInformation[].message contains action like "remove the whole `use` item"
+                                                // and relatedInformation[].location.range contains the range to delete
+                                                if let Some(related_info) = diag.get("relatedInformation").and_then(|r| r.as_array()) {
+                                                    for info in related_info {
+                                                        if let Some(info_message) = info.get("message").and_then(|m| m.as_str()) {
+                                                            // Check if this is a removal suggestion
+                                                            let is_removal = info_message.to_lowercase().contains("remove");
+                                                            
+                                                            if is_removal {
+                                                                if let Some(location) = info.get("location") {
+                                                                    if let Some(info_range) = location.get("range") {
+                                                                        if let (Some(info_start), Some(info_end)) = (
+                                                                            info_range.get("start"),
+                                                                            info_range.get("end")
+                                                                        ) {
+                                                                            // Get the file from the location URI
+                                                                            let info_uri = location.get("uri")
+                                                                                .and_then(|u| u.as_str())
+                                                                                .map(|u| u.trim_start_matches("file:///").replace("%20", " "))
+                                                                                .unwrap_or_else(|| file_path.clone());
+                                                                            
+                                                                            let start_line = info_start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1;
+                                                                            let start_col = info_start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1;
+                                                                            let end_line = info_end.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1;
+                                                                            let end_col = info_end.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1;
+                                                                            
+                                                                            tracing::debug!("🔧 Found removal suggestion in relatedInformation: '{}' at {}:{}-{}:{}", 
+                                                                                info_message, start_line, start_col, end_line, end_col);
+                                                                            
+                                                                            // Create a code action for removal (delete the range)
+                                                                            let edit = ui::diagnostics::TextEdit {
+                                                                                file_path: info_uri,
+                                                                                start_line,
+                                                                                start_column: start_col,
+                                                                                end_line,
+                                                                                end_column: end_col,
+                                                                                new_text: String::new(), // Empty = delete
+                                                                            };
+                                                                            
+                                                                            // Use the message as the title, capitalized nicely
+                                                                            let title = format!("{}", info_message.trim_end_matches('.'));
+                                                                            
+                                                                            code_actions.push(ui::diagnostics::CodeAction {
+                                                                                title,
+                                                                                edits: vec![edit],
+                                                                            });
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                
                                                 diagnostics.push(Diagnostic {
                                                     file_path,
                                                     line,
                                                     column,
+                                                    end_line,
+                                                    end_column,
                                                     severity,
                                                     message: message.to_string(),
-                                                    code: None,
+                                                    code,
                                                     source: Some("rust-analyzer".to_string()),
+                                                    code_actions,
+                                                    raw_lsp_diagnostic: Some(diag.clone()),
                                                 });
                                             }
                                         }
@@ -832,19 +1007,19 @@ impl RustAnalyzerManager {
                         }
                     }
                     "window/workDoneProgress/create" => {
-                        println!("📊 Work done progress created");
+                        tracing::debug!("📊 Work done progress created");
                     }
                     "rust-analyzer/serverStatus" => {
                         // rust-analyzer sends this when its status changes
                         // params: { health: "ok" | "warning" | "error", quiescent: bool, message?: string }
                         // quiescent = true means the server is idle (all background work done)
                         if let Some(params) = msg.get("params") {
-                            println!("🔔 rust-analyzer/serverStatus: {:?}", params);
+                            tracing::debug!("🔔 rust-analyzer/serverStatus: {:?}", params);
                             
                             // Check if the server is quiescent (idle, all indexing done)
                             if let Some(quiescent) = params.get("quiescent").and_then(|q| q.as_bool()) {
                                 if quiescent {
-                                    println!("✅ rust-analyzer is quiescent (all indexing complete)");
+                                    tracing::debug!("✅ rust-analyzer is quiescent (all indexing complete)");
                                     let _ = progress_tx.send(ProgressUpdate::Ready);
                                 }
                             }
@@ -852,7 +1027,7 @@ impl RustAnalyzerManager {
                     }
                     _ => {
                         // Log unhandled notifications to help with debugging
-                        println!("📨 Unhandled LSP notification: {}", method);
+                        tracing::debug!("📨 Unhandled LSP notification: {}", method);
                     }
                 }
             }
@@ -861,7 +1036,7 @@ impl RustAnalyzerManager {
 
     /// Stop rust-analyzer
     pub fn stop(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        println!("🛑 Stopping rust-analyzer");
+        tracing::debug!("🛑 Stopping rust-analyzer");
         self.stop_internal();
         self.status = AnalyzerStatus::Stopped;
         cx.emit(AnalyzerEvent::StatusChanged(AnalyzerStatus::Stopped));
@@ -886,7 +1061,7 @@ impl RustAnalyzerManager {
         if let Some(mut child) = process_lock.take() {
             let _ = child.kill();
             let _ = child.wait();
-            println!("✓ rust-analyzer process terminated");
+            tracing::debug!("✓ rust-analyzer process terminated");
         }
         self.initialized = false;
         self.progress_rx = None;
@@ -894,7 +1069,7 @@ impl RustAnalyzerManager {
 
     /// Restart rust-analyzer
     pub fn restart(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        println!("🔄 Restarting rust-analyzer");
+        tracing::debug!("🔄 Restarting rust-analyzer");
         if let Some(workspace) = self.workspace_root.clone() {
             self.stop(window, cx);
             // Give it a moment to clean up
@@ -983,7 +1158,7 @@ impl RustAnalyzerManager {
             }
         });
 
-        println!("💾 Notifying rust-analyzer of file save: {:?}", file_path);
+        tracing::debug!("💾 Notifying rust-analyzer of file save: {:?}", file_path);
         self.send_notification(notification)
     }
 
@@ -1120,7 +1295,7 @@ impl RustAnalyzerManager {
                 if last_update.elapsed() > Duration::from_secs(3) && matches!(self.status, AnalyzerStatus::Indexing { .. }) {
                     self.initial_analysis_complete = true;
                     self.status = AnalyzerStatus::Ready;
-                    println!("✅ Initial analysis complete (timeout - no updates for 3s)");
+                    tracing::debug!("✅ Initial analysis complete (timeout - no updates for 3s)");
                     cx.emit(AnalyzerEvent::Ready);
                     cx.notify();
                 }
@@ -1144,7 +1319,7 @@ impl RustAnalyzerManager {
                 if !self.initial_analysis_complete {
                     self.initial_analysis_complete = true;
                     self.status = AnalyzerStatus::Ready;
-                    println!("✅ Initial analysis marked as complete");
+                    tracing::debug!("✅ Initial analysis marked as complete");
                     cx.emit(AnalyzerEvent::Ready);
                     cx.notify();
                 }
@@ -1160,7 +1335,7 @@ impl RustAnalyzerManager {
                 } else {
                     format!("rust-analyzer exited with error (status: {:?})", status)
                 };
-                println!("❌ {}", error_msg);
+                tracing::debug!("❌ {}", error_msg);
                 self.status = AnalyzerStatus::Error(error_msg.clone());
                 self.initialized = false;
                 cx.emit(AnalyzerEvent::Error(error_msg));
@@ -1170,7 +1345,7 @@ impl RustAnalyzerManager {
                 // Track when we first receive diagnostics - this indicates the analyzer is working
                 if self.first_diagnostics_time.is_none() {
                     self.first_diagnostics_time = Some(Instant::now());
-                    println!("📊 First diagnostics received - analyzer is working");
+                    tracing::debug!("📊 First diagnostics received - analyzer is working");
                 }
                 
                 // If we've been receiving diagnostics for more than 2 seconds and haven't marked as ready,
@@ -1180,12 +1355,13 @@ impl RustAnalyzerManager {
                         && first_time.elapsed() > Duration::from_secs(2) {
                         self.initial_analysis_complete = true;
                         self.status = AnalyzerStatus::Ready;
-                        println!("✅ Initial analysis complete based on diagnostics (received for 2s)");
+                        tracing::debug!("✅ Initial analysis complete based on diagnostics (received for 2s)");
                         cx.emit(AnalyzerEvent::Ready);
                         cx.notify();
                     }
                 }
                 
+                tracing::debug!("📤 EMITTING AnalyzerEvent::Diagnostics with {} diagnostics", diagnostics.len());
                 cx.emit(AnalyzerEvent::Diagnostics(diagnostics));
                 // Don't notify here, let the app handle it
             }
@@ -1240,6 +1416,242 @@ impl RustAnalyzerManager {
         });
 
         self.send_request("textDocument/definition", params)
+    }
+
+    /// Request code actions (quick fixes) for a specific range
+    /// Returns a receiver for async awaiting the response
+    pub fn request_code_actions_async(
+        &self,
+        file_path: &PathBuf,
+        start_line: usize,
+        start_column: usize,
+        end_line: usize,
+        end_column: usize,
+        diagnostic_message: Option<&str>,
+    ) -> Result<flume::Receiver<Value>> {
+        if !self.is_running() {
+            tracing::warn!("📛 request_code_actions_async: rust-analyzer is not running!");
+            return Err(anyhow!("rust-analyzer is not running"));
+        }
+        
+        tracing::debug!("📤 request_code_actions_async: file={:?}, range={}:{}-{}:{}, msg={:?}",
+            file_path, start_line, start_column, end_line, end_column, diagnostic_message);
+
+        let uri = self.path_to_uri(file_path);
+        
+        // Build the diagnostic context if we have a message
+        let diagnostics = if let Some(msg) = diagnostic_message {
+            vec![json!({
+                "range": {
+                    "start": {
+                        "line": start_line.saturating_sub(1),
+                        "character": start_column.saturating_sub(1)
+                    },
+                    "end": {
+                        "line": end_line.saturating_sub(1),
+                        "character": end_column.saturating_sub(1)
+                    }
+                },
+                "message": msg,
+                "severity": 1
+            })]
+        } else {
+            vec![]
+        };
+        
+        let params = json!({
+            "textDocument": {
+                "uri": uri
+            },
+            "range": {
+                "start": {
+                    "line": start_line.saturating_sub(1),
+                    "character": start_column.saturating_sub(1)
+                },
+                "end": {
+                    "line": end_line.saturating_sub(1),
+                    "character": end_column.saturating_sub(1)
+                }
+            },
+            "context": {
+                "diagnostics": diagnostics,
+                "only": ["quickfix"],
+                "triggerKind": 1
+            }
+        });
+        
+        tracing::debug!("📤 Sending codeAction request: {}", serde_json::to_string_pretty(&params).unwrap_or_default());
+
+        self.send_request_async("textDocument/codeAction", params)
+    }
+    
+    /// Request code actions using the raw LSP diagnostic
+    /// This provides better matching than reconstructing the diagnostic
+    pub fn request_code_actions_with_diagnostic(
+        &self,
+        file_path: &PathBuf,
+        raw_diagnostic: &Value,
+    ) -> Result<flume::Receiver<Value>> {
+        if !self.is_running() {
+            tracing::warn!("📛 request_code_actions_with_diagnostic: rust-analyzer is not running!");
+            return Err(anyhow!("rust-analyzer is not running"));
+        }
+        
+        let uri = self.path_to_uri(file_path);
+        
+        // Extract range from the raw diagnostic
+        let range = raw_diagnostic.get("range").cloned().unwrap_or_else(|| json!({
+            "start": {"line": 0, "character": 0},
+            "end": {"line": 0, "character": 0}
+        }));
+        
+        tracing::debug!("📤 request_code_actions_with_diagnostic: file={:?}, raw_diag={}", 
+            file_path, serde_json::to_string_pretty(raw_diagnostic).unwrap_or_default());
+        
+        let params = json!({
+            "textDocument": {
+                "uri": uri
+            },
+            "range": range,
+            "context": {
+                "diagnostics": [raw_diagnostic],
+                "only": ["quickfix"],
+                "triggerKind": 1
+            }
+        });
+        
+        tracing::debug!("📤 Sending codeAction request with raw diagnostic: {}", 
+            serde_json::to_string_pretty(&params).unwrap_or_default());
+
+        self.send_request_async("textDocument/codeAction", params)
+    }
+
+    /// Parse code action response into TextEdits
+    /// Returns a list of parsed actions, along with actions that need resolution (have data but no edit)
+    pub fn parse_code_actions(response: &Value) -> Vec<ui::diagnostics::CodeAction> {
+        let mut actions = Vec::new();
+        
+        tracing::debug!("📥 parse_code_actions received: {}", serde_json::to_string_pretty(response).unwrap_or_default());
+        
+        if let Some(arr) = response.as_array() {
+            for action in arr {
+                tracing::debug!("📋 Parsing action: {}", action.get("title").and_then(|t| t.as_str()).unwrap_or("no title"));
+                if let Some(parsed) = Self::parse_single_code_action(action) {
+                    actions.push(parsed);
+                }
+            }
+        }
+        
+        actions
+    }
+    
+    /// Parse a single code action from JSON
+    pub fn parse_single_code_action(action: &Value) -> Option<ui::diagnostics::CodeAction> {
+        // Get title
+        let title = action.get("title")
+            .and_then(|t| t.as_str())
+            .unwrap_or("Unknown action")
+            .to_string();
+        
+        let mut edits = Vec::new();
+        
+        // Check if this is a resolved action with edit
+        if let Some(edit) = action.get("edit") {
+            // Check changes format
+            if let Some(changes) = edit.get("changes").and_then(|c| c.as_object()) {
+                for (uri, edit_array) in changes {
+                    if let Some(edit_list) = edit_array.as_array() {
+                        let file_path = Self::uri_to_path(uri);
+                        for text_edit in edit_list {
+                            if let Some(te) = Self::parse_text_edit(text_edit, &file_path) {
+                                edits.push(te);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check documentChanges format
+            if let Some(doc_changes) = edit.get("documentChanges").and_then(|c| c.as_array()) {
+                for doc_change in doc_changes {
+                    // Handle TextDocumentEdit
+                    if let Some(text_doc) = doc_change.get("textDocument") {
+                        let file_path = text_doc.get("uri")
+                            .and_then(|u| u.as_str())
+                            .map(Self::uri_to_path)
+                            .unwrap_or_default();
+                        
+                        if let Some(edit_list) = doc_change.get("edits").and_then(|e| e.as_array()) {
+                            for text_edit in edit_list {
+                                if let Some(te) = Self::parse_text_edit(text_edit, &file_path) {
+                                    edits.push(te);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if !edits.is_empty() {
+            Some(ui::diagnostics::CodeAction { title, edits })
+        } else {
+            None
+        }
+    }
+    
+    /// Convert a file URI to a local path
+    fn uri_to_path(uri: &str) -> String {
+        let path = uri.trim_start_matches("file:///");
+        // Handle common URL encoding manually
+        path.replace("%20", " ")
+            .replace("%3A", ":")
+            .replace("%5C", "\\")
+            .replace("%2F", "/")
+            .replace("%23", "#")
+            .replace("%25", "%")
+    }
+    
+    /// Get unresolved code actions from a response (actions that have data but no edit)
+    pub fn get_unresolved_actions(response: &Value) -> Vec<Value> {
+        let mut unresolved = Vec::new();
+        
+        if let Some(arr) = response.as_array() {
+            for action in arr {
+                // If it has data but no edit, it needs resolving
+                if action.get("data").is_some() && action.get("edit").is_none() {
+                    unresolved.push(action.clone());
+                }
+            }
+        }
+        
+        unresolved
+    }
+    
+    /// Resolve a code action to get its actual text edits
+    pub fn resolve_code_action_async(&self, action: &Value) -> Result<flume::Receiver<Value>> {
+        if !self.is_running() {
+            return Err(anyhow!("rust-analyzer is not running"));
+        }
+        
+        self.send_request_async("codeAction/resolve", action.clone())
+    }
+    
+    /// Parse a single text edit from JSON
+    fn parse_text_edit(text_edit: &Value, file_path: &str) -> Option<ui::diagnostics::TextEdit> {
+        let range = text_edit.get("range")?;
+        let new_text = text_edit.get("newText").and_then(|t| t.as_str())?;
+        let start = range.get("start")?;
+        let end = range.get("end")?;
+        
+        Some(ui::diagnostics::TextEdit {
+            file_path: file_path.to_string(),
+            start_line: start.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1,
+            start_column: start.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1,
+            end_line: end.get("line").and_then(|l| l.as_u64()).unwrap_or(0) as usize + 1,
+            end_column: end.get("character").and_then(|c| c.as_u64()).unwrap_or(0) as usize + 1,
+            new_text: new_text.to_string(),
+        })
     }
 }
 

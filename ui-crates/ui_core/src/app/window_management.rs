@@ -4,8 +4,8 @@ use std::sync::Arc;
 use gpui::{px, size, Bounds, Context, Point, Window, WindowBounds, WindowKind, WindowOptions};
 use gpui::AppContext;
 use ui::Root;
-use ui_terminal::{Terminal, TerminalWindow};
 use ui_problems::ProblemsWindow;
+use ui_type_debugger::TypeDebuggerWindow;
 use ui_multiplayer::MultiplayerWindow;
 
 use super::PulsarApp;
@@ -108,13 +108,15 @@ impl PulsarApp {
         );
     }
 
-    pub(super) fn toggle_terminal(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_type_debugger(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let type_debugger_drawer = self.state.type_debugger_drawer.clone();
+
         let _ = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds {
                     origin: Point {
-                        x: px(150.0),
-                        y: px(150.0),
+                        x: px(120.0),
+                        y: px(120.0),
                     },
                     size: size(px(1000.0), px(700.0)),
                 })),
@@ -133,9 +135,8 @@ impl PulsarApp {
                 ..Default::default()
             },
             |window, cx| {
-                let terminal = cx.new(|cx| Terminal::new(window, cx).expect("Failed to create terminal"));
-                let terminal_window = cx.new(|cx| TerminalWindow::new(terminal, window, cx));
-                cx.new(|cx| Root::new(terminal_window.into(), window, cx))
+                let type_debugger_window = cx.new(|cx| TypeDebuggerWindow::new(type_debugger_drawer, window, cx));
+                cx.new(|cx| Root::new(type_debugger_window.into(), window, cx))
             },
         );
     }

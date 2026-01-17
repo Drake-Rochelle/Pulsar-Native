@@ -4,30 +4,22 @@
 
 // Modules
 pub mod app;
-pub mod flow;
 pub mod unified_palette;
-pub mod types;
 pub mod actions;
 pub mod root;
-pub mod editor_panel;
+pub mod builtin_editors;
 
 // Re-export main types
 pub use app::PulsarApp;
 pub use root::PulsarRoot;
-pub use types::EditorType;
-pub use editor_panel::EditorPanel;
 
 // Re-export actions
 pub use actions::{
     ToggleCommandPalette,
     ToggleFileManager,
     ToggleProblems,
-    ToggleTerminal,
     ToggleMultiplayer,
 };
-
-// Re-export flow
-pub use flow::AppState;
 
 // Re-export palette types
 pub use unified_palette::{AnyPaletteDelegate, AnyPaletteItem};
@@ -37,3 +29,6 @@ pub use ui_common::file_utils;
 
 // Re-export actions from ui crate
 pub use ui::OpenSettings;
+
+// Re-export builtin editor registration
+pub use builtin_editors::register_all_builtin_editors;

@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use crate::subsystems::render::bevy_renderer::core::{MainCamera, GameObjectId, SharedTexturesResource};
+use std::path::Path;
 
 /// Setup 3D scene - runs AFTER DXGI textures are created
 pub fn setup_scene(
@@ -11,13 +12,13 @@ pub fn setup_scene(
     mut materials: ResMut<Assets<StandardMaterial>>,
     shared_textures: Res<SharedTexturesResource>,
 ) {
-    println!("[BEVY] 🎬 Setting up scene...");
+    tracing::debug!("[BEVY] 🎬 Setting up scene...");
 
     // Get the shared textures to determine which buffer to render to
     let textures = match shared_textures.0.lock().ok().and_then(|l| l.as_ref().cloned()) {
         Some(t) => t,
         None => {
-            println!("[BEVY] ❌ No render targets available");
+            tracing::debug!("[BEVY] ❌ No render targets available");
             return;
         }
     };
@@ -26,15 +27,15 @@ pub fn setup_scene(
     let write_index = textures.write_index.load(std::sync::atomic::Ordering::Acquire);
     let render_target = textures.textures[write_index].clone();
     
-    println!("[BEVY] ✅ Got render target handles");
-    println!("[BEVY] 📍 Initial write_index={}, read_index={}", 
+    tracing::debug!("[BEVY] ✅ Got render target handles");
+    tracing::debug!("[BEVY] 📍 Initial write_index={}, read_index={}", 
              write_index, 
              textures.read_index.load(std::sync::atomic::Ordering::Acquire));
-    println!("[BEVY] 🎯 Camera will initially render to buffer {} (asset ID: {:?})", 
+    tracing::debug!("[BEVY] 🎯 Camera will initially render to buffer {} (asset ID: {:?})", 
              write_index, render_target.id());
 
     // Camera rendering to shared DXGI texture with TONEMAPPING DISABLED
-    println!("[BEVY] 📹 Creating camera targeting shared texture");
+    tracing::debug!("[BEVY] 📹 Creating camera targeting shared texture");
     commands.spawn((
         Camera3d::default(),
         Camera {
@@ -42,153 +43,260 @@ pub fn setup_scene(
             clear_color: bevy::prelude::ClearColorConfig::Custom(Color::srgb(0.2, 0.2, 0.3)), // Dark blue-grey background
             ..default()
         },
+        Projection::Perspective(PerspectiveProjection {
+            //TODO: We should design a function to remap the range
+            //      of reasonabe values to a 75-120 range for in-editor use
+            //      (Reasonable values seem to start att 88.5 degrees)
+            fov: 89.0,
+            near: 0.1,
+            far: 1000.0,
+            // Whereeeeevvvveeeer_you_are:
+            ..Default::default()
+        }),
         Transform::from_xyz(-3.0, 3.0, 6.0).looking_at(Vec3::new(0.0, 0.5, 0.0), Vec3::Y),
         Tonemapping::None, // CRITICAL: Disable tonemapping for proper color reproduction
         MainCamera,
     ));
-    println!("[BEVY] ✅ Camera spawned with tonemapping DISABLED - double-buffering enabled!");
-    println!("[BEVY] 🔄 Camera renders to write buffer, GPUI reads from read buffer");
+    tracing::debug!("[BEVY] ✅ Camera spawned with tonemapping DISABLED - double-buffering enabled!");
+    tracing::debug!("[BEVY] 🔄 Camera renders to write buffer, GPUI reads from read buffer");
 
-    // Scene objects - SUPER BRIGHT AND OBVIOUS
-    println!("[BEVY] 🎨 Spawning HIGH-VISIBILITY scene objects...");
+    // Try to load default level file from the project directory
+    let project_dir = engine_state::get_project_path()
+        .unwrap_or("C:\\Users\\redst\\OneDrive\\Documents\\Pulsar_Projects\\blank_project");
     
-    // Bright grey ground plane (concrete-like)
-    commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(20.0, 20.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.7, 0.7, 0.7),
-            metallic: 0.0,
-            perceptual_roughness: 0.8,
-            reflectance: 0.1,
-            ..default()
-        })),
-        Transform::from_xyz(0.0, 0.0, 0.0),
-    ));
-    println!("[BEVY] ✅ Ground plane spawned");
-
-    // Red metallic cube (left) - GAME OBJECT 1
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(2.0, 2.0, 2.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.9, 0.2, 0.2),
-            metallic: 0.8,
-            perceptual_roughness: 0.3,
-            reflectance: 0.5,
-            ..default()
-        })),
-        Transform::from_xyz(-2.0, 1.0, 0.0),
-        GameObjectId(1), // Link to game thread object ID 1
-    ));
-    println!("[BEVY] ✅ Red metallic cube spawned (Game Object #1)");
-
-    // Blue metallic sphere (right) - GAME OBJECT 2
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.2, 0.5, 0.9),
-            metallic: 0.9,
-            perceptual_roughness: 0.1,
-            reflectance: 0.9,
-            ..default()
-        })),
-        Transform::from_xyz(2.0, 1.0, 0.0),
-        GameObjectId(2), // Link to game thread object ID 2
-    ));
-    println!("[BEVY] ✅ Blue metallic sphere spawned (Game Object #2)");
-
-    // Gold metallic sphere (top) - GAME OBJECT 3
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.843, 0.0),
-            metallic: 0.95,
-            perceptual_roughness: 0.2,
-            reflectance: 0.8,
-            ..default()
-        })),
-        Transform::from_xyz(0.0, 3.0, 0.0),
-        GameObjectId(3), // Link to game thread object ID 3
-    ));
-    println!("[BEVY] ✅ Gold metallic sphere spawned (Game Object #3)");
-
-    // Green metallic sphere (front) - GAME OBJECT 4
-    commands.spawn((
-        Mesh3d(meshes.add(Sphere::new(1.0))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.2, 0.9, 0.3),
-            metallic: 0.6,
-            perceptual_roughness: 0.4,
-            reflectance: 0.5,
-            ..default()
-        })),
-        Transform::from_xyz(0.0, 1.0, 2.0),
-        GameObjectId(4), // Link to game thread object ID 4
-    ));
-    println!("[BEVY] ✅ Green metallic sphere spawned (Game Object #4)");
-
-    // Primary directional light (sun)
+    println!("[PULSAR_SCENE DEBUG] ========================================");
+    println!("[PULSAR_SCENE DEBUG] Project dir from engine_state::get_project_path(): {:?}", engine_state::get_project_path());
+    println!("[PULSAR_SCENE DEBUG] Using project_dir: {:?}", project_dir);
+    
+    let level_path = Path::new(&project_dir).join("scenes").join("default.level");
+    println!("[PULSAR_SCENE DEBUG] Level path: {:?}", level_path);
+    println!("[PULSAR_SCENE DEBUG] Level path exists: {}", level_path.exists());
+    println!("[PULSAR_SCENE DEBUG] ========================================");
+    
+    tracing::debug!("[BEVY] 🔍 Checking for level file at {:?}", level_path);
+    let mut id = 1;
+    
+    if level_path.exists() {
+        println!("[PULSAR_SCENE DEBUG] Level file EXISTS! Attempting to read...");
+        tracing::debug!("[BEVY] 📂 Loading level from: {:?}", level_path);
+        match std::fs::read_to_string(&level_path) {
+            Ok(content) => {
+                println!("[BEVY DEBUG] Successfully read file, {} bytes", content.len());
+                println!("[BEVY DEBUG] File content preview (first 200 chars): {:?}", &content.chars().take(200).collect::<String>());
+                match serde_json::from_str::<LevelData>(&content) {
+                    Ok(level) => {
+                        println!("[BEVY DEBUG] ✅ JSON parsing successful! Found {} objects", level.game_objects.len());
+                        tracing::debug!("[BEVY] ✅ Level file parsed successfully");
+                        spawn_level_objects(&mut commands, &mut meshes, &mut materials, &level, &mut id);
+                        tracing::debug!("[BEVY] ✅ Level loaded with {} objects", id - 1);
+                    }
+                    Err(e) => {
+                        println!("[BEVY DEBUG] ❌ JSON parsing FAILED: {}", e);
+                        tracing::warn!("[BEVY] ⚠️ Failed to parse level file: {}", e);
+                        spawn_fallback_scene(&mut commands, &mut meshes, &mut materials, &mut id);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("[BEVY DEBUG] ❌ Failed to read file: {}", e);
+                tracing::warn!("[BEVY] ⚠️ Failed to read level file: {}", e);
+                spawn_fallback_scene(&mut commands, &mut meshes, &mut materials, &mut id);
+            }
+        }
+    } else {
+        println!("[BEVY DEBUG] Level file DOES NOT EXIST - using fallback");
+        tracing::debug!("[BEVY] 📂 No level file found at {:?}, using fallback scene", level_path);
+        spawn_fallback_scene(&mut commands, &mut meshes, &mut materials, &mut id);
+    }
+    
+    // Directional light with shadows enabled
     commands.spawn((
         DirectionalLight {
             color: Color::WHITE,
-            illuminance: 25000.0, // Bright sunlight
-            shadows_enabled: false,
+            illuminance: 20000.0,
+            shadows_enabled: true,
             ..default()
         },
         Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
     
-    // Fill light (softer, from opposite side)
-    commands.spawn((
-        DirectionalLight {
-            color: Color::srgb(0.9, 0.95, 1.0), // Slightly blue fill
-            illuminance: 8000.0,
-            shadows_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(-4.0, 6.0, -4.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-    
-    // Ambient light for overall scene brightness
+    // Ambient light
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
-        brightness: 500.0, // Subtle ambient
+        brightness: 300.0,
         affects_lightmapped_meshes: true,
     });
     
-    println!("[BEVY] ✅ PBR lighting enabled with 2 directional lights + ambient");
-
-    println!("[BEVY] ✅ Scene ready!");
-    println!("[BEVY] 🎨 You should see:");
-    println!("[BEVY] 🔵 Dark grey-blue background");
-    println!("[BEVY] ⬜ Light grey ground plane");
-    println!("[BEVY] 🔴 Red metallic cube (left)");
-    println!("[BEVY] 🔵 Blue metallic sphere (right)");
-    println!("[BEVY] 🟡 Gold metallic sphere (top)");
-    println!("[BEVY] 🟢 Green metallic sphere (front)");
-    println!("[BEVY] 💡 PBR lighting with 2-point lighting + ambient");
-    println!("[BEVY] 🔄 Animation enabled - objects will rotate smoothly");
+    tracing::debug!("[BEVY] ✅ Scene ready!");
 }
 
-/// Smooth rotation animation system - rotates all GameObjects
-/// This runs every frame to show real-time rendering performance
-pub fn animate_objects_system(
-    time: Res<Time>,
-    mut query: Query<(&mut Transform, &GameObjectId)>,
+fn spawn_fallback_scene(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    id: &mut u32,
 ) {
-    let delta = time.delta_secs();
+    tracing::debug!("[BEVY] 🎨 Spawning fallback scene (basic cube)...");
+    
+    // Ground plane
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(10.0, 0.1, 10.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.3, 0.3, 0.3),
+            metallic: 0.0,
+            perceptual_roughness: 0.8,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        GameObjectId((*id).into()),
+    ));
+    *id += 1;
+    
+    // Center cube
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.8, 0.3, 0.3),
+            metallic: 0.2,
+            perceptual_roughness: 0.5,
+            ..default()
+        })),
+        Transform::from_xyz(0.0, 0.6, 0.0).with_rotation(Quat::from_rotation_y(0.785)),
+        GameObjectId((*id).into()),
+    ));
+    *id += 1;
 
-    for (mut transform, game_obj) in query.iter_mut() {
-        // Rotate each object at different speeds based on ID
-        let rotation_speed = match game_obj.0 {
-            1 => 0.5,  // Red cube - slow rotation
-            2 => 1.0,  // Blue sphere - medium rotation
-            3 => 1.5,  // Gold sphere - fast rotation
-            4 => 0.75, // Green sphere - medium-slow rotation
-            _ => 0.0,
+    tracing::debug!("[BEVY] ✅ Fallback scene created with {} objects", *id - 1);
+}
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LevelData {
+    #[serde(default)]
+    name: Option<String>,
+    game_objects: Vec<GameObject>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GameObject {
+    #[serde(default)]
+    id: Option<u32>,
+    #[serde(default)]
+    name: Option<String>,
+    mesh_type: MeshType,
+    transform: GameObjectTransform,
+    #[serde(default)]
+    material: Option<MaterialData>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GameObjectTransform {
+    position: [f32; 3],
+    rotation: [f32; 3],
+    scale: [f32; 3],
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MaterialData {
+    #[serde(default)]
+    color: Option<Vec<f32>>,  // Support both RGB [r,g,b] and RGBA [r,g,b,a]
+    #[serde(default)]
+    metallic: Option<f32>,
+    #[serde(default)]
+    roughness: Option<f32>,
+    #[serde(default)]
+    emissive: Option<[f32; 3]>,
+    #[serde(default)]
+    alpha_mode: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum MeshType {
+    Cube,
+    Sphere,
+    Cylinder,
+    Plane,
+}
+
+fn spawn_level_objects(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    level: &LevelData,
+    id: &mut u32,
+) {
+    for obj in &level.game_objects {
+        let scale = &obj.transform.scale;
+        let mesh = match obj.mesh_type {
+            MeshType::Cube => meshes.add(Cuboid::new(scale[0], scale[1], scale[2])),
+            MeshType::Sphere => meshes.add(Sphere::new(scale[0]).mesh().ico(5).unwrap()),
+            MeshType::Cylinder => meshes.add(Cylinder::new(scale[0], scale[1])),
+            MeshType::Plane => meshes.add(Cuboid::new(scale[0], 0.1, scale[2])),
         };
 
-        // Rotate around Y axis (vertical)
-        transform.rotate_y(rotation_speed * delta);
+        let rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            obj.transform.rotation[0].to_radians(),
+            obj.transform.rotation[1].to_radians(),
+            obj.transform.rotation[2].to_radians(),
+        );
+
+        // Extract material data with defaults
+        let material_data = obj.material.as_ref();
+        
+        // Handle color (support both RGB and RGBA)
+        let color = if let Some(color_vec) = material_data.and_then(|m| m.color.as_ref()) {
+            if color_vec.len() >= 3 {
+                [color_vec[0], color_vec[1], color_vec[2]]
+            } else {
+                [0.8, 0.8, 0.8]
+            }
+        } else {
+            [0.8, 0.8, 0.8]
+        };
+        
+        let metallic = material_data
+            .and_then(|m| m.metallic)
+            .unwrap_or(0.0);
+        let roughness = material_data
+            .and_then(|m| m.roughness)
+            .unwrap_or(0.5);
+        let emissive = material_data
+            .and_then(|m| m.emissive)
+            .unwrap_or([0.0, 0.0, 0.0]);
+
+        let mut material = StandardMaterial {
+            base_color: Color::srgb(color[0], color[1], color[2]),
+            metallic,
+            perceptual_roughness: roughness,
+            emissive: Color::srgb(emissive[0], emissive[1], emissive[2]).into(),
+            ..default()
+        };
+
+        // Handle alpha mode if specified
+        if let Some(alpha_mode_str) = material_data.and_then(|m| m.alpha_mode.as_ref()) {
+            material.alpha_mode = match alpha_mode_str.as_str() {
+                "Opaque" => bevy::prelude::AlphaMode::Opaque,
+                "Mask" => bevy::prelude::AlphaMode::Mask(0.5),
+                "Blend" => bevy::prelude::AlphaMode::Blend,
+                _ => bevy::prelude::AlphaMode::Opaque,
+            };
+        }
+
+        commands.spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(materials.add(material)),
+            bevy::prelude::Transform::from_translation(Vec3::new(
+                obj.transform.position[0], 
+                obj.transform.position[1], 
+                obj.transform.position[2]
+            ))
+                .with_rotation(rotation)
+                .with_scale(Vec3::ONE),
+            GameObjectId((*id).into()),
+        ));
+        *id += 1;
     }
 }
 
