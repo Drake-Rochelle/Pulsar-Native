@@ -257,7 +257,7 @@ impl MultiplayerWindow {
                                         move |_, _| SharedString::from(id.clone())
                                     })
                                     .on_copied(|_, window, cx| {
-                                        println!("Session ID copied to clipboard");
+                                        tracing::debug!("Session ID copied to clipboard");
                                     })
                             )
                     )
@@ -290,7 +290,7 @@ impl MultiplayerWindow {
                                         move |_, _| SharedString::from(token.clone())
                                     })
                                     .on_copied(|_, window, cx| {
-                                        println!("Password copied to clipboard");
+                                        tracing::debug!("Password copied to clipboard");
                                     })
                             )
                     )
@@ -346,7 +346,7 @@ impl MultiplayerWindow {
                                         move |_, _| SharedString::from(format!("Session: {}\nPassword: {}", id, token))
                                     })
                                     .on_copied(|_, window, cx| {
-                                        println!("Join credentials copied to clipboard");
+                                        tracing::debug!("Join credentials copied to clipboard");
                                     })
                             )
                     )
@@ -605,7 +605,7 @@ impl MultiplayerWindow {
     pub(super) fn render_file_sync_tab(&self, cx: &mut Context<MultiplayerWindow>) -> impl IntoElement {
         // Show progress if sync is in progress
         if self.file_sync_in_progress {
-            tracing::info!("RENDER: Showing sync progress - message: {:?}, percent: {:?}",
+            tracing::debug!("RENDER: Showing sync progress - message: {:?}, percent: {:?}",
                 self.sync_progress_message, self.sync_progress_percent);
 
             return v_flex()
@@ -654,7 +654,7 @@ impl MultiplayerWindow {
 
         // Check if there's a pending file sync or files to review
         if let Some((diff, host_peer_id)) = &self.pending_file_sync {
-            tracing::info!("Rendering FileSync tab with pending diff");
+            tracing::debug!("Rendering FileSync tab with pending diff");
 
             // Show the new studio-quality file sync UI with action bar
             v_flex()
@@ -722,10 +722,10 @@ impl MultiplayerWindow {
                         )
                 )
                 .child(
-                    // Script Editor in diff mode
+                    // Diff Viewer for file sync
                     div()
                         .flex_1()
-                        .child(self.script_editor.clone())
+                        .child(self.diff_viewer.clone())
                 )
                 .into_any_element()
         } else {
@@ -973,7 +973,7 @@ impl MultiplayerWindow {
                                                         this.child(
                                                             Button::new(kick_id)
                                                                 .label("Kick")
-                                                                .icon(IconName::X)
+                                                                .icon(IconName::Close)
                                                                 .flex_1()
                                                                 .on_click(cx.listener(move |this, _, window, cx| {
                                                                     this.kick_user(peer_id_for_kick.clone(), window, cx);

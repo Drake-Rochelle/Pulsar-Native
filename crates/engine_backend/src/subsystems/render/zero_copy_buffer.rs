@@ -172,12 +172,16 @@ impl ZeroCopyFrameBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
+    /// Test dimensions (Full HD)
+    const TEST_WIDTH: u32 = 1920;
+    const TEST_HEIGHT: u32 = 1080;
+
     #[test]
     fn test_buffer_sizes() {
         // Test that alignment calculations are correct
-        let width = 1920u32;
-        let height = 1080u32;
+        let width = TEST_WIDTH;
+        let height = TEST_HEIGHT;
         
         let row_bytes = width * 4;
         let aligned_row = RenderDevice::align_copy_bytes_per_row(row_bytes as usize);
@@ -189,10 +193,10 @@ mod tests {
         let total_aligned = aligned_row * height as usize;
         let total_unaligned = (width * height * 4) as usize;
         
-        println!("1920x1080 frame:");
-        println!("  Unaligned: {} bytes ({:.2} MB)", total_unaligned, total_unaligned as f32 / 1_048_576.0);
-        println!("  Aligned: {} bytes ({:.2} MB)", total_aligned, total_aligned as f32 / 1_048_576.0);
-        println!("  Overhead: {} bytes ({:.2}%)", 
+        tracing::debug!("1920x1080 frame:");
+        tracing::debug!("  Unaligned: {} bytes ({:.2} MB)", total_unaligned, total_unaligned as f32 / 1_048_576.0);
+        tracing::debug!("  Aligned: {} bytes ({:.2} MB)", total_aligned, total_aligned as f32 / 1_048_576.0);
+        tracing::debug!("  Overhead: {} bytes ({:.2}%)", 
             total_aligned - total_unaligned,
             ((total_aligned - total_unaligned) as f32 / total_unaligned as f32) * 100.0
         );

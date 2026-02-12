@@ -31,7 +31,7 @@ pub mod windows_impl {
     impl SharedTextureManager {
         /// Create a new manager with the given D3D11 device
         pub unsafe fn new(device: ID3D11Device) -> Self {
-            println!("[DX11-OPENER] 🔧 Creating SharedTextureManager");
+            tracing::debug!("[DX11-OPENER] 🔧 Creating SharedTextureManager");
             Self {
                 device,
                 opened_textures: HashMap::new(),
@@ -48,12 +48,12 @@ pub mod windows_impl {
         ) -> Result<*mut std::ffi::c_void> {
             // Check if we already opened this handle
             if let Some((_, srv)) = self.opened_textures.get(&nt_handle) {
-                println!("[DX11-OPENER] ♻️ Reusing existing SRV for handle 0x{:X}", nt_handle);
+                tracing::debug!("[DX11-OPENER] ♻️ Reusing existing SRV for handle 0x{:X}", nt_handle);
                 let srv_ptr = srv.as_raw() as *mut std::ffi::c_void;
                 return Ok(srv_ptr);
             }
 
-            println!("[DX11-OPENER] 📂 Opening shared NT handle 0x{:X} in DX11...", nt_handle);
+            tracing::debug!("[DX11-OPENER] 📂 Opening shared NT handle 0x{:X} in DX11...", nt_handle);
 
             // Step 1: Open the shared resource in DX11
             // Convert usize to HANDLE (raw pointer)
@@ -63,12 +63,12 @@ pub mod windows_impl {
             // First, try to cast device to ID3D11Device1
             let device1: ID3D11Device1 = match self.device.cast() {
                 Ok(dev) => {
-                    println!("[DX11-OPENER] ✅ Successfully cast to ID3D11Device1");
+                    tracing::debug!("[DX11-OPENER] ✅ Successfully cast to ID3D11Device1");
                     dev
                 }
                 Err(e) => {
-                    eprintln!("[DX11-OPENER] ❌ Failed to cast to ID3D11Device1: {:?}", e);
-                    eprintln!("[DX11-OPENER] Device doesn't support D3D11.1!");
+                    tracing::error!("[DX11-OPENER] ❌ Failed to cast to ID3D11Device1: {:?}", e);
+                    tracing::error!("[DX11-OPENER] Device doesn't support D3D11.1!");
                     return Err(anyhow::anyhow!("Device doesn't support ID3D11Device1"));
                 }
             };
@@ -77,21 +77,21 @@ pub mod windows_impl {
             // API: pub unsafe fn OpenSharedResource1<P0, T>(&self, hresource: P0) -> windows_core::Result<T>
             let texture: ID3D11Texture2D = match device1.OpenSharedResource1(handle) {
                 Ok(tex) => {
-                    println!("[DX11-OPENER] ✅ OpenSharedResource1 succeeded!");
+                    tracing::info!("[DX11-OPENER] ✅ OpenSharedResource1 succeeded!");
                     tex
                 }
                 Err(e) => {
-                    eprintln!("[DX11-OPENER] ❌ OpenSharedResource1 FAILED!");
-                    eprintln!("[DX11-OPENER] 🔍 HRESULT: 0x{:08X}", e.code().0);
-                    eprintln!("[DX11-OPENER] 📋 Error: {:?}", e);
-                    eprintln!("[DX11-OPENER] 💡 Common causes:");
-                    eprintln!("[DX11-OPENER]    - Different GPU adapters (DX12 vs DX11)");
-                    eprintln!("[DX11-OPENER]    - Handle already closed/invalid");
-                    eprintln!("[DX11-OPENER]    - Missing D3D11_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS");
+                    tracing::error!("[DX11-OPENER] ❌ OpenSharedResource1 FAILED!");
+                    tracing::error!("[DX11-OPENER] 🔍 HRESULT: 0x{:08X}", e.code().0);
+                    tracing::error!("[DX11-OPENER] 📋 Error: {:?}", e);
+                    tracing::info!("[DX11-OPENER] 💡 Common causes:");
+                    tracing::info!("[DX11-OPENER]    - Different GPU adapters (DX12 vs DX11)");
+                    tracing::info!("[DX11-OPENER]    - Handle already closed/invalid");
+                    tracing::info!("[DX11-OPENER]    - Missing D3D11_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS");
                     return Err(e).context("Failed to open shared resource with OpenSharedResource1");
                 }
             };
-            println!("[DX11-OPENER] ✅ Opened D3D11 texture from shared handle");
+            tracing::debug!("[DX11-OPENER] ✅ Opened D3D11 texture from shared handle");
 
             // Step 2: Create Shader Resource View
             let srv_desc = D3D11_SHADER_RESOURCE_VIEW_DESC {
@@ -113,7 +113,7 @@ pub mod windows_impl {
             ).context("Failed to create SRV")?;
 
             let srv = srv.context("SRV was None after creation")?;
-            println!("[DX11-OPENER] ✅ Created SRV for {}x{} texture", width, height);
+            tracing::debug!("[DX11-OPENER] ✅ Created SRV for {}x{} texture", width, height);
 
             // Get raw pointer before storing
             let srv_ptr = srv.as_raw() as *mut std::ffi::c_void;
@@ -121,14 +121,14 @@ pub mod windows_impl {
             // Store for later reuse (keeps COM objects alive)
             self.opened_textures.insert(nt_handle, (texture, srv));
 
-            println!("[DX11-OPENER] 🎉 SRV ready at ptr: {:p}", srv_ptr);
+            tracing::debug!("[DX11-OPENER] 🎉 SRV ready at ptr: {:p}", srv_ptr);
             Ok(srv_ptr)
         }
 
         /// Close and release a shared texture
         pub fn release_texture(&mut self, nt_handle: usize) {
             if self.opened_textures.remove(&nt_handle).is_some() {
-                println!("[DX11-OPENER] 🗑️ Released texture for handle 0x{:X}", nt_handle);
+                tracing::debug!("[DX11-OPENER] 🗑️ Released texture for handle 0x{:X}", nt_handle);
             }
         }
 
@@ -140,7 +140,7 @@ pub mod windows_impl {
 
     impl Drop for SharedTextureManager {
         fn drop(&mut self) {
-            println!("[DX11-OPENER] 🧹 Dropping SharedTextureManager, releasing {} textures", 
+            tracing::debug!("[DX11-OPENER] 🧹 Dropping SharedTextureManager, releasing {} textures", 
                 self.opened_textures.len());
             self.opened_textures.clear();
         }
@@ -151,7 +151,7 @@ pub mod windows_impl {
 
     /// Initialize the global manager with a D3D11 device
     pub unsafe fn init_manager(device: ID3D11Device) {
-        println!("[DX11-OPENER] 🚀 Initializing global SharedTextureManager");
+        tracing::debug!("[DX11-OPENER] 🚀 Initializing global SharedTextureManager");
         let manager = SharedTextureManager::new(device);
         SHARED_TEXTURE_MANAGER.set(Arc::new(Mutex::new(manager)))
             .expect("SharedTextureManager already initialized");
@@ -201,7 +201,7 @@ pub unsafe fn init_from_gpui_window() -> anyhow::Result<()> {
     use windows::Win32::Graphics::Dxgi::*;
     use windows::core::Interface;
 
-    println!("[DX11-OPENER] 🔍 Attempting to initialize from current GPUI state...");
+    tracing::debug!("[DX11-OPENER] 🔍 Attempting to initialize from current GPUI state...");
     
     // Try to get the DXGI device from the current process
     // This is a workaround - ideally GPUI would expose its device
@@ -234,10 +234,10 @@ pub unsafe fn init_from_gpui_window() -> anyhow::Result<()> {
     )?;
     
     let device = device.context("Failed to create D3D11 device")?;
-    println!("[DX11-OPENER] ✅ Created D3D11 device for shared resource opening");
+    tracing::info!("[DX11-OPENER] ✅ Created D3D11 device for shared resource opening");
     
     init_manager(device);
-    println!("[DX11-OPENER] ✅ Manager initialized successfully");
+    tracing::info!("[DX11-OPENER] ✅ Manager initialized successfully");
     
     Ok(())
 }

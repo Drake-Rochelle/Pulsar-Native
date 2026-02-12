@@ -1,0 +1,23 @@
+[package]
+name = "ui_flamegraph"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# UI framework
+gpui.workspace = true
+ui.workspace = true
+
+# Profiling - instrumentation-based (Unreal Insights style)
+profiling = { path = "../../crates/profiling" }
+parking_lot = "0.12"
+rusqlite = { version = "0.32", features = ["bundled"] }
+engine_state = { path = "../../crates/engine_state" }
+serde = { version = "1.0", features = ["derive"] }
+rand = "0.8"
+rfd = "0.9"
+rust-i18n.workspace = true
+
+[dev-dependencies]
+rand = "0.8"

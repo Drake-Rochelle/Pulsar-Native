@@ -11,7 +11,7 @@
 //! │   (ApplicationHandler for Winit)            │
 //! ├─────────────────────────────────────────────┤
 //! │ windows: HashMap<WindowId, WindowState>     │
-//! │ engine_state: EngineState                   │
+//! │ engine_context: EngineContext               │
 //! │ window_request_rx: Receiver<WindowRequest>  │
 //! └─────────────────────────────────────────────┘
 //!          │
@@ -54,8 +54,8 @@ use ui_loading_screen::create_loading_component;
 use ui_about::create_about_window;
 use ui_documentation::create_documentation_window;
 use ui_common::menu::{AboutApp, ShowDocumentation};
-use crate::window::{convert_modifiers, convert_mouse_button, WindowState};
-use engine_state::{EngineState, WindowRequest};
+use crate::window::{convert_modifiers, convert_mouse_button, WindowState, WindowIdMap};
+use engine_state::{EngineContext, WindowRequest};
 use gpui::*;
 use raw_window_handle::HasWindowHandle;
 use ui::Root;
@@ -96,7 +96,7 @@ use windows::{
 /// ## Fields
 ///
 /// - `windows` - Map of WindowId to WindowState for all active windows
-/// - `engine_state` - Shared engine state for cross-window communication
+/// - `engine_context` - Typed engine context for cross-window communication
 /// - `window_request_rx` - Channel for receiving window creation requests
 /// - `pending_window_requests` - Queue of requests to process on next frame
 ///
@@ -104,30 +104,34 @@ use windows::{
 /// the `window` module while remaining private to external code.
 pub struct WinitGpuiApp {
     pub(crate) windows: HashMap<WindowId, WindowState>,
-    pub(crate) engine_state: EngineState,
+    pub(crate) engine_context: EngineContext,
     pub(crate) window_request_rx: Receiver<WindowRequest>,
     pub(crate) pending_window_requests: Vec<WindowRequest>,
+    /// Safe mapping between WindowId and u64 (avoids unsafe transmute)
+    pub(crate) window_id_map: WindowIdMap,
 }
 
 impl WinitGpuiApp {
-    /// Create a new application handler
+    /// Create a new application handler with EngineContext
     ///
     /// # Arguments
-    /// * `engine_state` - Shared engine state
+    /// * `engine_context` - Typed engine context
     /// * `window_request_rx` - Channel for receiving window creation requests
     ///
     /// # Returns
     /// New WinitGpuiApp ready to be run
-    pub fn new(engine_state: EngineState, window_request_rx: Receiver<WindowRequest>) -> Self {
+    pub fn new(engine_context: EngineContext, window_request_rx: Receiver<WindowRequest>) -> Self {
         Self {
             windows: HashMap::new(),
-            engine_state,
+            engine_context,
             window_request_rx,
             pending_window_requests: Vec::new(),
+            window_id_map: WindowIdMap::new(),
         }
     }
 
     // TODO: Refactor window creation into a trait based system for modular window types
+    //       This will be especially useful as more window types are added via plugins.
     /// Create a new window based on a request
     ///
     /// # Arguments
@@ -136,17 +140,19 @@ impl WinitGpuiApp {
     ///
     /// **Note**: This method is `pub(crate)` to allow access from lifecycle handlers
     pub(crate) fn create_window(&mut self, event_loop: &ActiveEventLoop, request: WindowRequest) {
+        profiling::profile_scope!("Window::Create");
+
         let (title, size) = match &request {
             WindowRequest::Entry => ("Pulsar Engine", (1280.0, 720.0)),
             WindowRequest::Settings => ("Settings", (800.0, 600.0)),
-            WindowRequest::About => ("About Pulsar Engine", (600.0, 500.0)),
+            WindowRequest::About => ("About Pulsar Engine", (600.0, 900.0)),
             WindowRequest::Documentation => ("Documentation", (1400.0, 900.0)),
-            WindowRequest::ProjectEditor { .. } => ("Pulsar Engine - Project Editor", (1280.0, 800.0)),
+            WindowRequest::ProjectEditor { .. } => ("Pulsar Engine - Project Editor", (1920.0, 1080.0)),
             WindowRequest::ProjectSplash { .. } => ("Loading Project...", (960.0, 540.0)),
             WindowRequest::CloseWindow { .. } => return, // Handled elsewhere
         };
 
-        println!("≡ƒ¬ƒ [CREATE-WINDOW] Creating new window: {} (type: {:?})", title, request);
+        tracing::debug!("🪟 [CREATE-WINDOW] Creating new window: {} (type: {:?})", title, request);
 
         let mut window_attributes = WinitWindow::default_attributes()
             .with_title(title)
@@ -154,6 +160,11 @@ impl WinitGpuiApp {
             .with_transparent(false)
             .with_decorations(false) // Use custom titlebar instead of OS decorations
             .with_resizable(true); // Enable resize for borderless window
+
+        // Set window icon from embedded assets
+        if let Some(icon) = load_window_icon() {
+            window_attributes = window_attributes.with_window_icon(Some(icon));
+        }
 
         // Splash window positioning (centered by default)
         // Position::Automatic doesn't exist in winit, windows are centered by default
@@ -169,9 +180,10 @@ impl WinitGpuiApp {
         window_state.window_type = Some(request);
 
         self.windows.insert(window_id, window_state);
-        self.engine_state.increment_window_count();
+        *self.engine_context.window_count.lock() += 1;
+        let count = *self.engine_context.window_count.lock();
 
-        println!("Γ£à Window created: {} (total windows: {})", title, self.engine_state.window_count());
+        tracing::debug!("Γ£à Window created: {} (total windows: {})", title, count);
     }
 }
 
@@ -195,4 +207,26 @@ impl ApplicationHandler for WinitGpuiApp {
         // Delegate to lifecycle handler
         crate::window::handlers::lifecycle::handle_about_to_wait(self, event_loop);
     }
+}
+
+/// Load the window icon from embedded assets
+///
+/// Attempts to load the logo_sqrkl.png from embedded assets and convert
+/// it to a winit Icon. Returns None if loading fails.
+pub(crate) fn load_window_icon() -> Option<winit::window::Icon> {
+    use crate::assets::Assets;
+    
+    // Try to load the icon from embedded assets
+    let icon_data = Assets::get("images/logo_sqrkl.png")?;
+    
+    // Decode the PNG using the image crate
+    let img = image::load_from_memory(&icon_data.data)
+        .ok()?
+        .into_rgba8();
+    
+    let (width, height) = img.dimensions();
+    let rgba = img.into_raw();
+    
+    // Create winit Icon
+    winit::window::Icon::from_rgba(rgba, width, height).ok()
 }

@@ -48,11 +48,13 @@ pub unsafe fn initialize_d3d11_pipeline(
     app: &mut WinitGpuiApp,
     window_id: &WindowId,
 ) {
+    profiling::profile_scope!("Window::InitD3D11");
+
     let window_state = app.windows.get_mut(window_id).expect("Window state must exist");
     let winit_window = window_state.winit_window.clone();
     let size = winit_window.inner_size();
 
-    println!("✨ Initializing D3D11 for GPU blitting...");
+    tracing::debug!("✨ Initializing D3D11 for GPU blitting...");
 
     let mut device = None;
     let mut context = None;
@@ -70,30 +72,68 @@ pub unsafe fn initialize_d3d11_pipeline(
         Some(&mut context),
     );
 
-    if result.is_ok() && device.is_some() {
-        let window_state = app.windows.get_mut(window_id).expect("Window state must exist");
-        window_state.d3d_device = device.clone();
-        window_state.d3d_context = context;
-        println!("✨ D3D11 device created successfully!");
+    // Extract device and validate before proceeding
+    let Some(device) = device else {
+        tracing::error!("❌ Failed to create D3D11 device");
+        return;
+    };
 
-        // Create swap chain for the winit window
-        let parent_raw = winit_window.window_handle().unwrap().as_raw();
-        let hwnd = match parent_raw {
-            RawWindowHandle::Win32(h) => HWND(h.hwnd.get() as isize as *mut _),
-            _ => {
-                println!("❌ Failed to get HWND");
-                return;
-            }
-        };
+    if result.is_err() {
+        tracing::error!("❌ D3D11CreateDevice failed: {:?}", result);
+        return;
+    }
 
-        let dxgi_device: IDXGIDevice = device.as_ref().unwrap().cast().unwrap();
-        let adapter = dxgi_device.GetAdapter().unwrap();
-        let dxgi_factory: IDXGIFactory2 = adapter.GetParent().unwrap();
+    let window_state = app.windows.get_mut(window_id).expect("Window state must exist");
+    window_state.d3d_device = Some(device.clone());
+    window_state.d3d_context = context;
+    tracing::debug!("✨ D3D11 device created successfully!");
+
+    // Create swap chain for the winit window
+    let parent_raw = match winit_window.window_handle() {
+        Ok(handle) => handle.as_raw(),
+        Err(e) => {
+            tracing::error!("❌ Failed to get window handle: {:?}", e);
+            return;
+        }
+    };
+
+    let hwnd = match parent_raw {
+        RawWindowHandle::Win32(h) => HWND(h.hwnd.get() as isize as *mut _),
+        _ => {
+            tracing::error!("❌ Window handle is not Win32");
+            return;
+        }
+    };
+
+    // Get DXGI interfaces with proper error handling
+    let dxgi_device: IDXGIDevice = match device.cast() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!("❌ Failed to cast device to IDXGIDevice: {:?}", e);
+            return;
+        }
+    };
+
+    let adapter = match dxgi_device.GetAdapter() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!("❌ Failed to get DXGI adapter: {:?}", e);
+            return;
+        }
+    };
+
+    let dxgi_factory: IDXGIFactory2 = match adapter.GetParent() {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!("❌ Failed to get DXGI factory: {:?}", e);
+            return;
+        }
+    };
 
         // Swap chain must use physical pixels
         let physical_width = size.width;
         let physical_height = size.height;
-        println!("🖼️ Creating swap chain: physical {}x{}, scale {}",
+        tracing::debug!("🖼️ Creating swap chain: physical {}x{}, scale {}",
             physical_width, physical_height, winit_window.scale_factor());
 
         let swap_chain_desc = DXGI_SWAP_CHAIN_DESC1 {
@@ -114,7 +154,7 @@ pub unsafe fn initialize_d3d11_pipeline(
         };
 
         let swap_chain = dxgi_factory.CreateSwapChainForHwnd(
-            device.as_ref().unwrap(),
+            &device,
             hwnd,
             &swap_chain_desc,
             None,
@@ -124,15 +164,19 @@ pub unsafe fn initialize_d3d11_pipeline(
         if let Ok(swap_chain) = swap_chain {
             let window_state = app.windows.get_mut(window_id).expect("Window state must exist");
             window_state.swap_chain = Some(swap_chain.clone());
-            println!("✨ Swap chain created for winit window!");
+            tracing::debug!("✨ Swap chain created for winit window!");
 
             // Create render target view from swap chain back buffer
             if let Ok(back_buffer) = swap_chain.GetBuffer::<ID3D11Texture2D>(0) {
                 let mut rtv: Option<ID3D11RenderTargetView> = None;
-                if device.as_ref().unwrap().CreateRenderTargetView(&back_buffer, None, Some(&mut rtv as *mut _)).is_ok() {
+                if device.CreateRenderTargetView(&back_buffer, None, Some(&mut rtv as *mut _)).is_ok() {
                     window_state.render_target_view = rtv;
-                    println!("✨ Render target view created!");
+                    tracing::debug!("✨ Render target view created!");
+                } else {
+                    tracing::error!("❌ Failed to create render target view");
                 }
+            } else {
+                tracing::error!("❌ Failed to get back buffer from swap chain");
             }
 
             // Create blend state for alpha blending
@@ -161,13 +205,15 @@ pub unsafe fn initialize_d3d11_pipeline(
             };
 
             let mut blend_state = None;
-            if device.as_ref().unwrap().CreateBlendState(&blend_desc, Some(&mut blend_state as *mut _)).is_ok() {
+            if device.CreateBlendState(&blend_desc, Some(&mut blend_state as *mut _)).is_ok() {
                 window_state.blend_state = blend_state;
-                println!("✨ Blend state created for alpha composition!");
+                tracing::debug!("✨ Blend state created for alpha composition!");
+            } else {
+                tracing::error!("❌ Failed to create blend state");
             }
 
             // Create shaders for GPU alpha blending by compiling HLSL at runtime
-            println!("🔧 Compiling shaders at runtime...");
+            tracing::debug!("🔧 Compiling shaders at runtime...");
 
             // Vertex shader source: passthrough with position and texcoord
             let vs_source = r#"
@@ -228,7 +274,7 @@ float4 main(PS_INPUT input) : SV_TARGET {
                             err.GetBufferPointer() as *const u8,
                             err.GetBufferSize(),
                         );
-                        println!("❌ VS compile error: {}", String::from_utf8_lossy(err_msg));
+                        tracing::debug!("❌ VS compile error: {}", String::from_utf8_lossy(err_msg));
                     }
                 }
                 blob
@@ -258,7 +304,7 @@ float4 main(PS_INPUT input) : SV_TARGET {
                             err.GetBufferPointer() as *const u8,
                             err.GetBufferSize(),
                         );
-                        println!("❌ PS compile error: {}", String::from_utf8_lossy(err_msg));
+                        tracing::debug!("❌ PS compile error: {}", String::from_utf8_lossy(err_msg));
                     }
                 }
                 blob
@@ -283,7 +329,7 @@ float4 main(PS_INPUT input) : SV_TARGET {
             };
 
             if vs_bytecode.is_empty() || ps_bytecode.is_empty() {
-                println!("❌ Shader compilation failed!");
+                tracing::debug!("❌ Shader compilation failed!");
             }
 
             // Create D3D11 shader objects from compiled bytecode
@@ -291,13 +337,13 @@ float4 main(PS_INPUT input) : SV_TARGET {
             let mut pixel_shader = None;
 
             let vs_result = if !vs_bytecode.is_empty() {
-                device.as_ref().unwrap().CreateVertexShader(vs_bytecode, None, Some(&mut vertex_shader as *mut _))
+                device.CreateVertexShader(vs_bytecode, None, Some(&mut vertex_shader as *mut _))
             } else {
                 Err(Error::from(E_FAIL))
             };
 
             let ps_result = if !ps_bytecode.is_empty() {
-                device.as_ref().unwrap().CreatePixelShader(ps_bytecode, None, Some(&mut pixel_shader as *mut _))
+                device.CreatePixelShader(ps_bytecode, None, Some(&mut pixel_shader as *mut _))
             } else {
                 Err(Error::from(E_FAIL))
             };
@@ -305,9 +351,9 @@ float4 main(PS_INPUT input) : SV_TARGET {
             if vs_result.is_ok() && ps_result.is_ok() {
                 window_state.vertex_shader = vertex_shader;
                 window_state.pixel_shader = pixel_shader;
-                println!("✨ Shaders created from bytecode!");
+                tracing::debug!("✨ Shaders created from bytecode!");
             } else {
-                println!("❌ Failed to create shaders - VS: {:?}, PS: {:?}", vs_result, ps_result);
+                tracing::debug!("❌ Failed to create shaders - VS: {:?}, PS: {:?}", vs_result, ps_result);
             }
 
             if window_state.vertex_shader.is_some() && window_state.pixel_shader.is_some() {
@@ -334,11 +380,11 @@ float4 main(PS_INPUT input) : SV_TARGET {
                 ];
 
                 let mut input_layout = None;
-                if device.as_ref().unwrap().CreateInputLayout(&layout, vs_bytecode, Some(&mut input_layout as *mut _)).is_ok() {
+                if device.CreateInputLayout(&layout, vs_bytecode, Some(&mut input_layout as *mut _)).is_ok() {
                     window_state.input_layout = input_layout;
-                    println!("✨ Input layout created!");
+                    tracing::debug!("✨ Input layout created!");
                 } else {
-                    println!("❌ Failed to create input layout");
+                    tracing::error!("❌ Failed to create input layout");
                 }
             }
 
@@ -372,9 +418,11 @@ float4 main(PS_INPUT input) : SV_TARGET {
             };
 
             let mut vertex_buffer = None;
-            if device.as_ref().unwrap().CreateBuffer(&vb_desc, Some(&vb_data), Some(&mut vertex_buffer as *mut _)).is_ok() {
+            if device.CreateBuffer(&vb_desc, Some(&vb_data), Some(&mut vertex_buffer as *mut _)).is_ok() {
                 window_state.vertex_buffer = vertex_buffer;
-                println!("✨ Vertex buffer created!");
+                tracing::debug!("✨ Vertex buffer created!");
+            } else {
+                tracing::error!("❌ Failed to create vertex buffer");
             }
 
             // Create sampler state
@@ -392,19 +440,18 @@ float4 main(PS_INPUT input) : SV_TARGET {
             };
 
             let mut sampler_state = None;
-            if device.as_ref().unwrap().CreateSamplerState(&sampler_desc, Some(&mut sampler_state as *mut _)).is_ok() {
+            if device.CreateSamplerState(&sampler_desc, Some(&mut sampler_state as *mut _)).is_ok() {
                 window_state.sampler_state = sampler_state;
-                println!("✨ Sampler state created!");
+                tracing::debug!("✨ Sampler state created!");
+            } else {
+                tracing::error!("❌ Failed to create sampler state");
             }
 
-            println!("🎉 D3D11 pipeline initialization complete!");
-            println!("💡 Shared texture will be retrieved on first render");
+            tracing::debug!("🎉 D3D11 pipeline initialization complete!");
+            tracing::debug!("💡 Shared texture will be retrieved on first render");
         } else {
-            println!("❌ Failed to create swap chain");
+            tracing::error!("❌ Failed to create swap chain");
         }
-    } else {
-        println!("❌ Failed to create D3D11 device: {:?}", result);
-    }
 }
 
 /// Stub for non-Windows platforms

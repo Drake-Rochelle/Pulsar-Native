@@ -3,3 +3,28 @@ rustflags = ["-C", "link-arg=/STACK:8000000"]
 
 [build]
 jobs = 2
+
+[alias]
+set-logo = "run --manifest-path tools/set-logo/Cargo.toml --"
+
+# Global environment for all platforms
+[env]
+# Fix aws-lc-sys build - use pregenerated sources to avoid C11 compilation issues
+AWS_LC_SYS_NO_PREFIX = "1"
+# Try forcing non-CMake builder
+AWS_LC_SYS_CMAKE_BUILDER = "0"
+# Set C standard
+AWS_LC_SYS_C_STD = "c11"
+CMAKE_C_STANDARD = "11"
+
+
+# macOS-specific environment variables
+[target.aarch64-apple-darwin.env]
+CFLAGS = "-std=c11"
+CMAKE_C_FLAGS = "-std=c11"
+PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig:/opt/homebrew/opt/zlib/lib/pkgconfig:/usr/local/lib/pkgconfig"
+
+[target.x86_64-apple-darwin.env]
+CFLAGS = "-std=c11"
+CMAKE_C_FLAGS = "-std=c11"
+PKG_CONFIG_PATH = "/opt/homebrew/lib/pkgconfig:/opt/homebrew/opt/zlib/lib/pkgconfig:/usr/local/lib/pkgconfig"

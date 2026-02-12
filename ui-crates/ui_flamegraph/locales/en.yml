@@ -1,0 +1,54 @@
+# Flamegraph Profiler - en
+
+# Window Title
+Flamegraph.Title: "Flamegraph Profiler"
+
+# Toolbar Buttons
+Flamegraph.Record: "Record"
+Flamegraph.Stop: "Stop"
+Flamegraph.Recording: "RECORDING"
+Flamegraph.OpenSession: "Open Session"
+
+# Empty State
+Flamegraph.NoDataLoaded: "No Profiling Data"
+Flamegraph.GetStarted: "Choose an option below to get started"
+Flamegraph.StartRecording: "Start Recording"
+Flamegraph.StartRecordingDesc: "Capture real-time profiling data from your running application"
+Flamegraph.OpenPreviousSession: "Open Previous Session"
+Flamegraph.OpenSessionDesc: "Browse and load previously saved profiling sessions"
+Flamegraph.RecordingInProgress: "Recording in Progress"
+Flamegraph.WaitingForData: "Waiting for profiling data to appear..."
+Flamegraph.RecordingActive: "Recording Active"
+Flamegraph.DataWillAppear: "Data will appear here once profiling events are captured"
+
+# Pro Tips
+Flamegraph.ProTips: "Pro Tips"
+Flamegraph.Tip1: "Use Ctrl+Scroll to zoom horizontally, Shift+Scroll for vertical panning"
+Flamegraph.Tip2: "Right-click and drag to pan around the flamegraph freely"
+Flamegraph.Tip3: "Click on the framerate graph to jump to specific timeframes"
+
+# Statistics Sidebar
+Flamegraph.Statistics: "Statistics"
+Flamegraph.TotalSpans: "Total Spans:"
+Flamegraph.Duration: "Duration:"
+Flamegraph.Frames: "Frames:"
+Flamegraph.AvgFrame: "Avg Frame:"
+Flamegraph.MinFrame: "Min Frame:"
+Flamegraph.MaxFrame: "Max Frame:"
+Flamegraph.Threads: "Threads:"
+Flamegraph.MaxDepth: "Max Depth:"
+
+# Hover Popup
+Flamegraph.Start: "Start:"
+Flamegraph.End: "End:"
+Flamegraph.Thread: "Thread:"
+Flamegraph.Depth: "Depth:"
+Flamegraph.Unknown: "Unknown"
+
+# Units
+Flamegraph.Milliseconds: "%{value} ms"
+
+# Profiling Overlay
+Flamegraph.CollectingData: "Collecting Profiling Data..."
+Flamegraph.SpansCollected: "Spans Collected:"
+Flamegraph.StopRecording: "Stop Recording"

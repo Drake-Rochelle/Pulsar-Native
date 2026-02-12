@@ -104,7 +104,7 @@ actions!(
     ]
 );
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InputEvent {
     Change,
     PressEnter { secondary: bool },
@@ -723,7 +723,9 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         let text: SharedString = text.into();
-        self.replace_text_in_range_silent(None, &text, window, cx);
+        let cursor_utf16 = self.range_to_utf16(&(self.cursor()..self.cursor()));
+
+        self.replace_text_in_range_silent(Some(cursor_utf16), &text, window, cx);
         self.selected_range = (self.selected_range.end..self.selected_range.end).into();
     }
 
@@ -1501,8 +1503,18 @@ impl InputState {
             .as_ref()
             .map(|layout| layout.line_height)
             .unwrap_or(window.line_height());
-        let delta = event.delta.pixel_delta(line_height);
-        self.update_scroll_offset(Some(self.scroll_handle.offset() + delta), cx);
+
+        // If shift is held and soft_wrap is off, scroll horizontally
+        if event.modifiers.shift && !self.soft_wrap {
+            let delta = event.delta.pixel_delta(line_height);
+            let mut offset = self.scroll_handle.offset();
+            // Swap y and x for horizontal scroll
+            offset.x += delta.y;
+            self.update_scroll_offset(Some(offset), cx);
+        } else {
+            let delta = event.delta.pixel_delta(line_height);
+            self.update_scroll_offset(Some(self.scroll_handle.offset() + delta), cx);
+        }
         self.diagnostic_popover = None;
     }
 
@@ -1957,8 +1969,12 @@ impl InputState {
         });
     }
 
-    pub(super) fn on_key_down(&mut self, _: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.pause_blink_cursor(cx);
+
+        //FIX: This patched the inability to type in WINIT windows
+        let text = event.keystroke.key_char.clone().unwrap_or("".into());
+        self.replace(text, window, cx);
     }
 
     pub(super) fn on_drag_move(

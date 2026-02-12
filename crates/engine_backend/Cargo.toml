@@ -20,9 +20,12 @@ serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.4", features = ["v4"] }
 tokio = { version = "1", features = ["full"] }
 rapier3d.workspace = true
-nalgebra = { version = "0.32", features = ["serde-serialize"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2.0"
+dashmap = "6.1.0"
+
+# Profiling - instrumentation-based
+profiling = { path = "../profiling" }
 
 # UI dependencies needed for services
 gpui.workspace = true
@@ -31,31 +34,30 @@ lsp-types.workspace = true
 ropey.workspace = true
 flume = "0.11"
 
-# Rendering dependencies
-bevy = { version = "0.17.2", default-features = false, features = [
-    "bevy_render",
-    "bevy_core_pipeline",
-    "bevy_asset",
-    "bevy_winit",
-    "bevy_pbr",
-    "x11",
-    "wayland",
-] }
-wgpu = "26"
-wgpu-hal = "26"
-wgpu-types = "26"
-wgpu-profiler = "0.19"
-image = "0.25"
-bytemuck = { version = "1.14", features = ["derive"] }
+# Helio rendering (blade-graphics alternative)
+helio-core.workspace = true
+helio-render.workspace = true
+helio-features.workspace = true
+helio-feature-base-geometry.workspace = true
+helio-feature-lighting.workspace = true
+helio-feature-materials.workspace = true
+helio-feature-procedural-shadows.workspace = true
+helio-feature-bloom.workspace = true
+helio-feature-billboards.workspace = true
+blade-graphics.workspace = true
+glam.workspace = true
+
+wgpu = "27.0.0"
+wgpu-hal = "27.0.0"
 crossbeam-channel = "0.5"
 futures = "0.3"
 parking_lot = "0.12"
 anyhow = "1.0"
+# horizon = { git = "https://github.com/Far-Beyond-Dev/Horizon", rev = "b11774f548d50e183b9a452369cda6877fc0abe4" }
 serde_json = "1.0"
 
 # Networking dependencies
 async-tungstenite = { version = "0.23", features = ["tokio-runtime"] }
-url = "2.5"
 git2 = "0.19"
 sha2 = "0.10"
 walkdir = "2.4"

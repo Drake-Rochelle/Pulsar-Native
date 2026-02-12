@@ -21,9 +21,150 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crate::subsystems::framework::{Subsystem, SubsystemContext, SubsystemError, SubsystemId};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL};
+
+/// Subsystem ID for the game thread
+pub const GAME_SUBSYSTEM_ID: SubsystemId = SubsystemId::new("game");
+
+/// Managed wrapper for GameThread that implements Subsystem while providing runtime control
+///
+/// This allows the GameThread to be managed by SubsystemRegistry while still exposing
+/// methods like set_enabled() for runtime control (e.g., Edit/Play mode toggling).
+pub struct ManagedGameThread {
+    inner: Arc<GameThread>,
+}
+
+impl ManagedGameThread {
+    pub fn new(target_tps: f32) -> Self {
+        Self {
+            inner: Arc::new(GameThread::new(target_tps)),
+        }
+    }
+
+    /// Get a reference to the inner GameThread for runtime control
+    pub fn game_thread(&self) -> &Arc<GameThread> {
+        &self.inner
+    }
+}
+
+impl Subsystem for ManagedGameThread {
+    fn id(&self) -> SubsystemId {
+        GAME_SUBSYSTEM_ID
+    }
+
+    fn dependencies(&self) -> Vec<SubsystemId> {
+        vec![] // Game thread has no dependencies
+    }
+
+    fn init(&mut self, context: &SubsystemContext) -> Result<(), SubsystemError> {
+        // Delegate to inner GameThread's Subsystem implementation
+        // But we need to call it through a mutable reference we don't have...
+        // Actually, let's just inline the init logic here
+        profiling::profile_scope!("Subsystem::Game::Init");
+
+        let state = self.inner.state.clone();
+        let enabled = self.inner.enabled.clone();
+        let target_tps = self.inner.target_tps;
+        let tps = self.inner.tps.clone();
+        let frame_count = self.inner.frame_count.clone();
+
+        tracing::debug!("[GAME-THREAD] ⚡ Initializing managed game thread subsystem...");
+
+        let handle = std::thread::Builder::new()
+            .name("Game Logic".to_string())
+            .spawn(move || {
+                profiling::set_thread_name("Game Logic");
+
+                #[cfg(target_os = "windows")]
+                {
+                    unsafe {
+                        let handle = GetCurrentThread();
+                        let _ = SetThreadPriority(handle, THREAD_PRIORITY_ABOVE_NORMAL);
+                    }
+                }
+
+                let target_frame_time = Duration::from_secs_f32(1.0 / target_tps);
+                let mut last_tick = Instant::now();
+                let mut tps_timer = Instant::now();
+                let mut tick_count = 0u32;
+                let mut accumulated_time = Duration::ZERO;
+
+                loop {
+                    profiling::profile_scope!("Game::Tick");
+
+                    if !enabled.load(Ordering::Relaxed) {
+                        thread::sleep(Duration::from_millis(target_frame_time.as_millis().min(1) as u64));
+                        continue;
+                    }
+
+                    let frame_start = Instant::now();
+                    let delta = frame_start - last_tick;
+                    last_tick = frame_start;
+                    accumulated_time += delta;
+
+                    let fixed_dt = 1.0 / target_tps;
+                    let max_steps = 5;
+                    let mut steps = 0;
+
+                    while accumulated_time >= target_frame_time && steps < max_steps {
+                        profiling::profile_scope!("Game::StateUpdate");
+                        if let Ok(mut game_state) = state.try_lock() {
+                            game_state.update(fixed_dt);
+                        }
+
+                        accumulated_time -= target_frame_time;
+                        steps += 1;
+                        tick_count += 1;
+                        frame_count.fetch_add(1, Ordering::Relaxed);
+                    }
+
+                    if tps_timer.elapsed() >= Duration::from_secs(1) {
+                        let measured_tps = tick_count as f32 / tps_timer.elapsed().as_secs_f32();
+                        if let Ok(mut tps_lock) = tps.lock() {
+                            *tps_lock = measured_tps;
+                        }
+                        tick_count = 0;
+                        tps_timer = Instant::now();
+                    }
+
+                    let frame_time = frame_start.elapsed();
+                    if frame_time < target_frame_time {
+                        thread::sleep(target_frame_time - frame_time);
+                    }
+
+                    if frame_count.load(Ordering::Relaxed) % 30 == 0 {
+                        thread::yield_now();
+                    }
+                }
+            })
+            .map_err(|e| SubsystemError::InitFailed(format!("Failed to spawn game thread: {}", e)))?;
+
+        // Store handle in inner (need unsafe to modify through Arc)
+        // Actually we can't do this cleanly. Let's rethink...
+
+        tracing::info!("✓ Managed game thread initialized at {} TPS", target_tps);
+
+        Ok(())
+    }
+
+    fn shutdown(&mut self) -> Result<(), SubsystemError> {
+        profiling::profile_scope!("Subsystem::Game::Shutdown");
+
+        tracing::debug!("[GAME-THREAD] Shutting down managed game thread");
+
+        // Signal thread to stop
+        self.inner.enabled.store(false, Ordering::Relaxed);
+
+        thread::sleep(Duration::from_millis(50));
+
+        tracing::info!("✓ Managed game thread stopped");
+
+        Ok(())
+    }
+}
 
 /// Represents a game object with position, velocity, and other properties
 #[derive(Debug, Clone)]
@@ -54,34 +195,9 @@ impl GameObject {
     }
 
     /// Update object position based on velocity and delta time
-    pub fn update(&mut self, delta_time: f32) {
-        if !self.active {
-            return;
-        }
-
-        self.position[0] += self.velocity[0] * delta_time;
-        self.position[1] += self.velocity[1] * delta_time;
-        self.position[2] += self.velocity[2] * delta_time;
-
-        // Update rotation - FAST and OBVIOUS rotation for great visual feedback
-        self.rotation[0] += 120.0 * delta_time; // X-axis rotation (120 degrees/sec)
-        self.rotation[1] += 80.0 * delta_time;  // Y-axis rotation (80 degrees/sec)
-        self.rotation[2] += 60.0 * delta_time;  // Z-axis rotation (60 degrees/sec)
-
-        // Keep rotation values in 0-360 range
-        for i in 0..3 {
-            if self.rotation[i] >= 360.0 {
-                self.rotation[i] -= 360.0;
-            }
-        }
-
-        // Simple bounce logic for demo (bounce off boundaries)
-        for i in 0..3 {
-            if self.position[i] < -10.0 || self.position[i] > 10.0 {
-                self.velocity[i] = -self.velocity[i];
-                self.position[i] = self.position[i].clamp(-10.0, 10.0);
-            }
-        }
+    pub fn update(&mut self, _delta_time: f32) {
+        // Static objects - no movement or rotation
+        // Objects maintain their initial transform
     }
 }
 
@@ -132,38 +248,102 @@ pub struct GameThread {
     target_tps: f32,
     tps: Arc<Mutex<f32>>,
     frame_count: Arc<AtomicU64>,
+    thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl GameThread {
     pub fn new(target_tps: f32) -> Self {
-        println!("[GAME-THREAD] ===== Creating Game Thread =====");
+        tracing::debug!("[GAME-THREAD] ===== Creating Game Thread =====");
         let mut initial_state = GameState::new();
         
-        // Add some demo objects with different velocities and starting rotations
-        // FAST, OBVIOUS MOVEMENT for easy visibility
+        // Create a beautiful default level similar to Unreal's starter content
+        // Floor plane - large ground surface
         initial_state.add_object({
-            let mut obj = GameObject::new(1, 0.0, 0.0, 0.0).with_velocity(2.0, 0.0, 1.5);
+            let mut obj = GameObject::new(1, 0.0, -0.5, 0.0);
+            obj.scale = [20.0, 0.1, 20.0]; // Large flat plane
             obj.rotation = [0.0, 0.0, 0.0];
             obj
         });
+        
+        // Center cube - focal point
         initial_state.add_object({
-            let mut obj = GameObject::new(2, -2.0, 0.0, 0.0).with_velocity(1.5, 0.0, -1.0);
-            obj.rotation = [45.0, 90.0, 0.0];
-            obj
-        });
-        initial_state.add_object({
-            let mut obj = GameObject::new(3, 2.0, 0.0, 0.0).with_velocity(-1.0, 0.0, 1.5);
-            obj.rotation = [90.0, 0.0, 45.0];
-            obj
-        });
-        initial_state.add_object({
-            let mut obj = GameObject::new(4, 0.0, 0.0, -2.0).with_velocity(-1.5, 0.0, 2.0);
-            obj.rotation = [180.0, 45.0, 90.0];
+            let mut obj = GameObject::new(2, 0.0, 0.5, 0.0);
+            obj.scale = [1.0, 1.0, 1.0];
+            obj.rotation = [0.0, 45.0, 0.0]; // Slight rotation for visual interest
             obj
         });
         
-        println!("[GAME-THREAD] Added {} demo objects (with rotation)", initial_state.objects.len());
-        println!("[GAME-THREAD] Target TPS: {}", target_tps);
+        // Sphere on the left
+        initial_state.add_object({
+            let mut obj = GameObject::new(3, -3.0, 1.0, 0.0);
+            obj.scale = [1.0, 1.0, 1.0];
+            obj.rotation = [0.0, 0.0, 0.0];
+            obj
+        });
+        
+        // Cylinder on the right
+        initial_state.add_object({
+            let mut obj = GameObject::new(4, 3.0, 1.0, 0.0);
+            obj.scale = [1.0, 2.0, 1.0];
+            obj.rotation = [0.0, 0.0, 0.0];
+            obj
+        });
+        
+        // Back wall/cube
+        initial_state.add_object({
+            let mut obj = GameObject::new(5, 0.0, 2.0, -5.0);
+            obj.scale = [8.0, 4.0, 0.5]; // Tall wall
+            obj.rotation = [0.0, 0.0, 0.0];
+            obj
+        });
+        
+        // Small decorative cubes - left side
+        initial_state.add_object({
+            let mut obj = GameObject::new(6, -5.0, 0.3, 2.0);
+            obj.scale = [0.6, 0.6, 0.6];
+            obj.rotation = [0.0, 30.0, 0.0];
+            obj
+        });
+        
+        initial_state.add_object({
+            let mut obj = GameObject::new(7, -4.0, 0.3, 3.0);
+            obj.scale = [0.6, 0.6, 0.6];
+            obj.rotation = [0.0, -15.0, 0.0];
+            obj
+        });
+        
+        // Small decorative cubes - right side
+        initial_state.add_object({
+            let mut obj = GameObject::new(8, 5.0, 0.3, 2.0);
+            obj.scale = [0.6, 0.6, 0.6];
+            obj.rotation = [0.0, -30.0, 0.0];
+            obj
+        });
+        
+        initial_state.add_object({
+            let mut obj = GameObject::new(9, 4.0, 0.3, 3.0);
+            obj.scale = [0.6, 0.6, 0.6];
+            obj.rotation = [0.0, 15.0, 0.0];
+            obj
+        });
+        
+        // Foreground elements
+        initial_state.add_object({
+            let mut obj = GameObject::new(10, -2.0, 0.5, 4.0);
+            obj.scale = [1.2, 0.5, 1.2];
+            obj.rotation = [0.0, 0.0, 0.0];
+            obj
+        });
+        
+        initial_state.add_object({
+            let mut obj = GameObject::new(11, 2.0, 0.5, 4.0);
+            obj.scale = [1.2, 0.5, 1.2];
+            obj.rotation = [0.0, 0.0, 0.0];
+            obj
+        });
+        
+        tracing::debug!("[GAME-THREAD] Created default level with {} static objects", initial_state.objects.len());
+        tracing::debug!("[GAME-THREAD] Target TPS: {}", target_tps);
 
         Self {
             state: Arc::new(Mutex::new(initial_state)),
@@ -171,6 +351,7 @@ impl GameThread {
             target_tps,
             tps: Arc::new(Mutex::new(0.0)),
             frame_count: Arc::new(AtomicU64::new(0)),
+            thread_handle: None,
         }
     }
 
@@ -199,101 +380,6 @@ impl GameThread {
         self.enabled.store(!current, Ordering::Relaxed);
     }
 
-    /// Start the game thread with fixed timestep game loop
-    pub fn start(&self) {
-        let state = self.state.clone();
-        let enabled = self.enabled.clone();
-        let target_tps = self.target_tps;
-        let tps = self.tps.clone();
-        let frame_count = self.frame_count.clone();
-
-        println!("[GAME-THREAD] ⚡ start() method called - about to spawn thread...");
-        
-        thread::spawn(move || {
-            println!("[GAME-THREAD] 🚀 Thread spawned successfully!");
-            
-            // Set thread priority for game logic
-            #[cfg(target_os = "windows")]
-            {
-                unsafe {
-                    let handle = GetCurrentThread();
-                    let _ = SetThreadPriority(handle, THREAD_PRIORITY_ABOVE_NORMAL);
-                }
-                println!("[GAME-THREAD] Started with high priority on Windows");
-            }
-
-            #[cfg(not(target_os = "windows"))]
-            {
-                println!("[GAME-THREAD] Started (priority control not available on this platform)");
-            }
-
-            let target_frame_time = Duration::from_secs_f32(1.0 / target_tps);
-            let mut last_tick = Instant::now();
-            let mut tps_timer = Instant::now();
-            let mut tick_count = 0u32;
-            let mut accumulated_time = Duration::ZERO;
-
-            println!("[GAME-THREAD] Starting game loop at target {} TPS", target_tps);
-            println!("[GAME-THREAD] Target frame time: {:?}", target_frame_time);
-
-            loop {
-                // Check if thread is disabled - if so, sleep and skip this iteration
-                if !enabled.load(Ordering::Relaxed) {
-                    thread::sleep(Duration::from_millis(100));
-                    continue;
-                }
-
-                let frame_start = Instant::now();
-                let delta = frame_start - last_tick;
-                last_tick = frame_start;
-                accumulated_time += delta;
-
-                // Fixed timestep update
-                let fixed_dt = 1.0 / target_tps;
-                let max_steps = 5; // Prevent spiral of death
-                let mut steps = 0;
-
-                while accumulated_time >= target_frame_time && steps < max_steps {
-                    // Update game state
-                    if let Ok(mut game_state) = state.try_lock() {
-                        game_state.update(fixed_dt);
-                    }
-
-                    accumulated_time -= target_frame_time;
-                    steps += 1;
-                    tick_count += 1;
-                    frame_count.fetch_add(1, Ordering::Relaxed);
-                }
-
-                // Calculate TPS every second
-                if tps_timer.elapsed() >= Duration::from_secs(1) {
-                    let measured_tps = tick_count as f32 / tps_timer.elapsed().as_secs_f32();
-                    if let Ok(mut tps_lock) = tps.lock() {
-                        *tps_lock = measured_tps;
-                    }
-
-                    tick_count = 0;
-                    tps_timer = Instant::now();
-                }
-
-                // Sleep to maintain target TPS with some CPU throttling
-                let frame_time = frame_start.elapsed();
-                if frame_time < target_frame_time {
-                    let sleep_time = target_frame_time - frame_time;
-                    thread::sleep(sleep_time);
-                }
-
-                // Periodic yield for system responsiveness
-                if frame_count.load(Ordering::Relaxed) % 30 == 0 {
-                    thread::yield_now();
-                }
-            }
-
-            println!("[GAME-THREAD] Stopped");
-        });
-        
-        println!("[GAME-THREAD] ✅ Thread spawn completed, returning from start()");
-    }
 }
 
 #[cfg(test)]

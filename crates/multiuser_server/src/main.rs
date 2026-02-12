@@ -23,8 +23,8 @@ async fn main() -> Result<()> {
     // Check if we should run the simple test server instead
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "--test-server" {
-        println!("🧪 Running simple test server on 0.0.0.0:8080");
-        println!("This is a minimal stdlib TCP server for testing external connectivity");
+        tracing::debug!("🧪 Running simple test server on 0.0.0.0:8080");
+        tracing::debug!("This is a minimal stdlib TCP server for testing external connectivity");
         return simple_test_server::run();
     }
 
@@ -54,8 +54,8 @@ async fn main() -> Result<()> {
     let _metrics = metrics::init(&config).context("Failed to initialize metrics")?;
     logging::log_status("📊", "Metrics", "READY", true);
 
-    // 7. Initialize persistence (DB + S3)
-    if config.database_url.is_some() || config.s3_bucket.is_some() {
+    // 7. Initialize persistence (DB + local storage)
+    if config.database_url.is_some() || config.storage_dir.is_some() {
         info!("💾 Initializing persistence layer...");
         let _persistence = PersistenceLayer::new((*config).clone())
             .await
@@ -106,13 +106,13 @@ async fn main() -> Result<()> {
     });
     logging::log_status("🧹", "Garbage Collector", "RUNNING", true);
 
-    println!("\n{}", "✅ All services started successfully!".bright_green().bold());
-    println!("{}\n", "━".repeat(60).bright_black());
+    tracing::debug!("\n{}", "✅ All services started successfully!".bright_green().bold());
+    tracing::debug!("{}\n", "━".repeat(60).bright_black());
 
     // 12. Wait for shutdown signal
     tokio::select! {
         _ = signal::ctrl_c() => {
-            println!("\n{}", "⚠️  Received Ctrl+C, initiating graceful shutdown...".bright_yellow());
+            tracing::debug!("\n{}", "⚠️  Received Ctrl+C, initiating graceful shutdown...".bright_yellow());
         }
         _ = shutdown_rx.recv() => {
             info!("🛑 Received shutdown signal");
@@ -120,8 +120,8 @@ async fn main() -> Result<()> {
     }
 
     // 13. Initiate graceful shutdown
-    println!("{}", "🛑 Shutting down services...".bright_yellow().bold());
-    println!("{}", "━".repeat(60).bright_black());
+    tracing::debug!("{}", "🛑 Shutting down services...".bright_yellow().bold());
+    tracing::debug!("{}", "━".repeat(60).bright_black());
 
     // Signal all services to stop
     let _ = http_shutdown_tx.send(()).await;
@@ -154,8 +154,8 @@ async fn main() -> Result<()> {
         logging::log_status("📡", "Telemetry", "STOPPED", true);
     }
 
-    println!("\n{}", "👋 Pulsar MultiEdit service stopped cleanly".bright_green().bold());
-    println!("{}\n", "━".repeat(60).bright_black());
+    tracing::debug!("\n{}", "👋 Pulsar MultiEdit service stopped cleanly".bright_green().bold());
+    tracing::debug!("{}\n", "━".repeat(60).bright_black());
 
     Ok(())
 }

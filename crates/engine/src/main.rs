@@ -1,196 +1,285 @@
-#![allow(warnings)]
+//#![windows_subsystem = "windows"]
+//! # Pulsar Engine Main Entry Point
+//!
+//! ## Initialization Architecture
+//!
+//! The engine uses a **dependency graph-based initialization system** (`InitGraph`) that:
+//! - Explicitly declares dependencies between initialization tasks
+//! - Validates the dependency graph (detects cycles, missing dependencies)
+//! - Executes tasks in topological order
+//! - Provides comprehensive profiling instrumentation
+//!
+//! ## Key Systems
+//!
+//! - **Typed Context System** (`EngineContext`) - Type-safe state management
+//! - **Dependency Graph Init** (`InitGraph`) - Declarative startup ordering
+//! - **Window System** (`WinitGpuiApp`) - Multi-window management with GPUI + D3D11
+//! - **Profiling** - Per-task timing and performance analysis
+//!
+//! ## Initialization Tasks
+//!
+//! 1. **Logging** - Tracy/tracing setup
+//! 2. **App Data** - Config directory initialization
+//! 3. **Settings** - Load engine configuration
+//! 4. **Runtime** - Tokio async runtime
+//! 5. **Backend** - Engine backend subsystems (physics, etc.)
+//! 6. **Channels** - Window request communication
+//! 7. **Engine Context** - Global typed state
+//! 8. **Set Global** - Register context globally
+//! 9. **Discord** - Rich presence initialization
+//! 10. **URI Registration** - Custom URI scheme (pulsar://)
+//!
+//! Each task is profiled with `Engine::Init::{TaskName}` scope.
 
-// Engine modules and imports
-use crate::settings::EngineSettings;
-use directories::ProjectDirs;
-use gpui::Action;
-use gpui::*;
-use gpui::SharedString;
-use ui::{scroll::ScrollbarShow, Root};
-use ui_core::ToggleCommandPalette;
-use serde::Deserialize;
-use std::fs;
-use std::path::Path;
-
-// Winit imports
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{channel, Sender, Receiver};
-use std::time::{Duration, Instant};
-use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton as WinitMouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
-use winit::window::{Window as WinitWindow, WindowId};
-use winit::keyboard::{PhysicalKey, KeyCode};
-
-#[cfg(target_os = "windows")]
-use windows::{
-    core::*,
-    Win32::{
-        Foundation::*,
-        Graphics::{
-            Direct3D::*,
-            Direct3D11::*,
-            Direct3D::Fxc::*,
-            Dxgi::{Common::*, *},
-        },
-    },
-};
-
-// Use the library
-use pulsar_engine::*;
-
-// Binary-only modules
-mod window;  // Winit integration (Winit + GPUI coordination)
-
-// Use engine_state crate
-pub use engine_state::{EngineState, WindowRequest, WindowRequestSender, WindowRequestReceiver, window_request_channel};
-
-// Engine constants
-pub const ENGINE_NAME: &str = env!("CARGO_PKG_NAME");
-pub const ENGINE_LICENSE: &str = env!("CARGO_PKG_LICENSE");
-pub const ENGINE_AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
-pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const ENGINE_HOMEPAGE: &str = env!("CARGO_PKG_HOMEPAGE");
-pub const ENGINE_REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
-pub const ENGINE_DESCRIPTION: &str = env!("CARGO_PKG_DESCRIPTION");
-pub const ENGINE_LICENSE_FILE: &str = env!("CARGO_PKG_LICENSE_FILE");
-
-// WindowRequest now comes from engine_state crate
-
-// Engine actions
-#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
-#[action(namespace = story, no_json)]
-pub struct SelectScrollbarShow(ScrollbarShow);
-
-#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
-#[action(namespace = story, no_json)]
-pub struct SelectLocale(SharedString);
-
-#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
-#[action(namespace = story, no_json)]
-pub struct SelectFont(usize);
-
-#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
-#[action(namespace = story, no_json)]
-pub struct SelectRadius(usize);
-
+// Re-export render from backend where it actually lives
+pub use engine_backend::subsystems::render;
+// Re-export compiler and graph from ui crate (canonical location)
+pub use ui::compiler;
+pub use ui::graph;
+// Re-export themes from ui crate (where it belongs)
+pub use ui::themes;
+// Re-export engine state
+pub use engine_state;
+// Re-export Assets type for convenience
+pub use assets::Assets;
 // Re-export OpenSettings from ui crate
 pub use ui::OpenSettings;
 
-// Import window management utilities from the window module
-use window::{convert_mouse_button, convert_modifiers, SimpleClickState, MotionSmoother, WindowState, WinitGpuiApp};
+// --- External and engine imports ---
+use crate::settings::EngineSettings;
+use std::sync::mpsc::channel;
 
+// --- Internal modules ---
+
+// Re-export core modules that UI needs
+pub mod assets;     // Asset embedding and management
+pub mod settings;   // Engine settings loading and saving
+pub mod logging;    // Logging setup and configuration
+pub mod args;       // Command-line argument parsing
+pub mod appdata;    // App data and resource directory management
+pub mod consts;     // Engine constants (name, version, authors, etc.)
+pub mod discord;    // Discord Rich Presence integration
+pub mod runtime;    // Async runtime setup and management
+pub mod event_loop; // Main event loop handling
+pub mod window;     // Winit integration (Winit + GPUI coordination)
+pub mod uri;        // URI scheme handling
+pub mod init;       // Initialization dependency graph (Phase 1 - new)
+
+// --- Engine context re-exports ---
+pub use engine_state::{
+    EngineContext,
+    WindowRequest,
+    WindowRequestSender,
+    WindowRequestReceiver,
+    window_request_channel,
+    LaunchContext,
+};
+
+use init::{InitGraph, InitTask, InitContext, task_ids::*};
+
+/// Main entry point for the Pulsar Engine binary.
+///
+/// Uses dependency graph-based initialization for explicit ordering and validation.
 fn main() {
-    // Initialize logging backend with env filter support
-    // Set RUST_LOG=debug to see debug logs, RUST_LOG=trace for all logs
-    // Filter out wgpu shader compilation spam by setting wgpu crates to warn level
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,wgpu_hal=warn,wgpu_core=warn,naga=warn"))
-        )
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .init();
+    // Name the main thread FIRST
+    profiling::set_thread_name("Main Thread");
 
-    tracing::info!("{}", ENGINE_NAME);
-    tracing::info!("Version: {}", ENGINE_VERSION);
-    tracing::info!("Authors: {}", ENGINE_AUTHORS);
-    tracing::info!("Description: {}", ENGINE_DESCRIPTION);
-    tracing::info!("🚀 Starting Pulsar Engine with Winit + GPUI Zero-Copy Composition");
+    // Enable profiling globally
+    profiling::enable_profiling();
 
-    // Determine app data directory
-    let proj_dirs = ProjectDirs::from("com", "Pulsar", "Pulsar_Engine")
-        .expect("Could not determine app data directory");
-    let appdata_dir = proj_dirs.data_dir();
-    let themes_dir = appdata_dir.join("themes");
-    let config_dir = appdata_dir.join("configs");
-    let config_file = config_dir.join("engine.toml");
+    // Parse arguments first (needed for init context)
+    dotenv::dotenv().ok();
+    let parsed = args::parse_args();
 
-    tracing::debug!("App data directory: {:?}", appdata_dir);
-    tracing::debug!("Themes directory: {:?}", themes_dir);
-    tracing::debug!("Config directory: {:?}", config_dir);
-    tracing::debug!("Config file: {:?}", config_file);
+    // Create initialization context
+    let mut init_ctx = InitContext::new(parsed.clone());
 
-    // Extract bundled themes if not present
-    if !themes_dir.exists() {
-        if let Err(e) = fs::create_dir_all(&themes_dir) {
-            tracing::error!("Failed to create themes directory: {e}");
-        } else {
-            // Copy all themes from project themes/ to appdata_dir/themes/
-            let project_themes_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap()
-                .join("themes");
-            if let Ok(entries) = fs::read_dir(&project_themes_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file() {
-                        if let Some(name) = path.file_name() {
-                            let dest = themes_dir.join(name);
-                            let _ = fs::copy(&path, &dest);
-                        }
-                    }
-                }
+    // Build initialization dependency graph
+    let mut graph = InitGraph::new();
+
+    // Task 1: Logging (no dependencies)
+    graph.add_task(InitTask::new(
+        LOGGING,
+        "Logging",
+        vec![],
+        Box::new(move |ctx| {
+            let _log_guard = logging::init(ctx.launch_args.verbose);
+
+            // Engine metadata logging
+            tracing::debug!("{}", consts::ENGINE_NAME);
+            tracing::debug!("Version: {}", consts::ENGINE_VERSION);
+            tracing::debug!("Authors: {}", consts::ENGINE_AUTHORS);
+            tracing::debug!("Description: {}", consts::ENGINE_DESCRIPTION);
+            tracing::debug!("🚀 Starting Pulsar Engine with Winit + GPUI Zero-Copy Composition");
+            tracing::debug!("Command-line arguments: {:?}", std::env::args().collect::<Vec<_>>());
+
+            ctx.log_guard = Some(_log_guard);
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 2: App data (depends on logging)
+    graph.add_task(InitTask::new(
+        APPDATA,
+        "App Data",
+        vec![LOGGING],
+        Box::new(|_ctx| {
+            let appdata = appdata::setup_appdata();
+            tracing::debug!("App data directory: {:?}", appdata.appdata_dir);
+            tracing::debug!("Themes directory: {:?}", appdata.themes_dir);
+            tracing::debug!("Config directory: {:?}", appdata.config_dir);
+            tracing::debug!("Config file: {:?}", appdata.config_file);
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 3: Settings (depends on app data)
+    graph.add_task(InitTask::new(
+        SETTINGS,
+        "Settings",
+        vec![APPDATA],
+        Box::new(|_ctx| {
+            let appdata = appdata::setup_appdata();
+            tracing::debug!("Loading engine settings from {:?}", appdata.config_file);
+            let _engine_settings = EngineSettings::load(&appdata.config_file);
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 4: Runtime (depends on logging)
+    graph.add_task(InitTask::new(
+        RUNTIME,
+        "Async Runtime",
+        vec![LOGGING],
+        Box::new(|ctx| {
+            let rt = runtime::create_runtime();
+            ctx.runtime = Some(rt);
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 5: Backend (depends on runtime)
+    graph.add_task(InitTask::new(
+        BACKEND,
+        "Engine Backend",
+        vec![RUNTIME],
+        Box::new(|ctx| {
+            let rt = ctx.runtime.as_ref().ok_or_else(||
+                init::InitError::MissingContext("Runtime not initialized")
+            )?;
+
+            let backend = rt.block_on(async {
+                engine_backend::EngineBackend::init().await
+            });
+
+            // Set backend as global for access from other parts of the engine
+            let backend_arc = std::sync::Arc::new(parking_lot::RwLock::new(backend));
+            engine_backend::EngineBackend::set_global(backend_arc);
+
+            // NOTE: Backend is now globally accessible via EngineBackend::global()
+            // No need to store in InitContext
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 6: Channels (no dependencies)
+    graph.add_task(InitTask::new(
+        CHANNELS,
+        "Window Channels",
+        vec![],
+        Box::new(|ctx| {
+            let (window_tx, window_rx) = channel::<WindowRequest>();
+            ctx.window_tx = Some(window_tx);
+            ctx.window_rx = Some(window_rx);
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 7: Engine Context (depends on channels)
+    graph.add_task(InitTask::new(
+        ENGINE_CONTEXT,
+        "Engine Context",
+        vec![CHANNELS],
+        Box::new(|ctx| {
+            let window_tx = ctx.window_tx.as_ref()
+                .ok_or_else(|| init::InitError::MissingContext("Window sender not initialized"))?
+                .clone();
+            let engine_context = EngineContext::new().with_window_sender(window_tx);
+
+            // Handle URI project path if present
+            if let Some(uri::UriCommand::OpenProject { path }) = &ctx.launch_args.uri_command {
+                tracing::debug!("Launching project from URI: {}", path.display());
+                let mut launch = engine_context.launch.write();
+                launch.uri_project_path = Some(path.clone());
             }
-        }
+
+            ctx.engine_context = Some(engine_context);
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 8: Set Global (depends on engine context)
+    graph.add_task(InitTask::new(
+        SET_GLOBAL,
+        "Set Global Context",
+        vec![ENGINE_CONTEXT],
+        Box::new(|ctx| {
+            let engine_context = ctx.engine_context.as_ref().ok_or_else(||
+                init::InitError::MissingContext("Engine context not initialized")
+            )?;
+
+            engine_context.clone().set_global();
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 9: Discord (depends on set_global)
+    graph.add_task(InitTask::new(
+        DISCORD,
+        "Discord Rich Presence",
+        vec![SET_GLOBAL],
+        Box::new(|ctx| {
+            let engine_context = ctx.engine_context.as_ref().ok_or_else(||
+                init::InitError::MissingContext("Engine context not initialized")
+            )?;
+
+            if let Err(e) = discord::init_discord(engine_context, consts::DISCORD_APP_ID) {
+                tracing::warn!("Failed to initialize Discord Rich Presence: {}", e);
+            }
+            Ok(())
+        })
+    )).unwrap();
+
+    // Task 10: URI Registration (depends on runtime)
+    graph.add_task(InitTask::new(
+        URI_REGISTRATION,
+        "URI Scheme Registration",
+        vec![RUNTIME],
+        Box::new(|ctx| {
+            let rt = ctx.runtime.as_ref().ok_or_else(||
+                init::InitError::MissingContext("Runtime not initialized")
+            )?;
+
+            rt.spawn(async {
+                if let Err(e) = uri::ensure_uri_scheme_registered() {
+                    tracing::error!("Failed to register URI scheme: {}", e);
+                }
+            });
+            Ok(())
+        })
+    )).unwrap();
+
+    // Execute the initialization graph
+    if let Err(e) = graph.execute(&mut init_ctx) {
+        eprintln!("Engine initialization failed: {}", e);
+        std::process::exit(1);
     }
 
-    // Create default config if not present
-    if !config_file.exists() {
-        if let Err(e) = fs::create_dir_all(&config_dir) {
-            tracing::error!("Failed to create config directory: {e}");
-        }
-        let default_settings = EngineSettings::default();
-        default_settings.save(&config_file);
-    }
+    // Extract initialized components
+    let engine_context = init_ctx.engine_context.expect("Engine context should be initialized");
+    let window_rx = init_ctx.window_rx.expect("Window receiver should be initialized");
 
-    // Load settings
-    tracing::info!("Loading engine settings from {:?}", config_file);
-    let _engine_settings = EngineSettings::load(&config_file);
-
-    // Initialize Tokio runtime for engine backend
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(8)
-        .thread_name("PulsarEngineRuntime")
-        .enable_all()
-        .build()
-        .unwrap();
-
-    // Init the Game engine backend (subsystems, etc)
-    rt.block_on(engine_backend::EngineBackend::init());
-
-    // Create channel for window creation requests
-    let (window_tx, window_rx) = channel::<WindowRequest>();
-
-    // Create shared engine state with window sender
-    let engine_state = EngineState::new().with_window_sender(window_tx.clone());
-
-    // Set global engine state for access from GPUI views
-    engine_state.clone().set_global();
-
-    // Initialize Discord Rich Presence
-    // NOTE: Replace this with your Discord Application ID from https://discord.com/developers/applications
-    // To disable Discord integration, simply comment out these lines
-    let discord_app_id = "1450965386014228491";
-    if discord_app_id != "YOUR_DISCORD_APPLICATION_ID_HERE" {
-        match engine_state.init_discord(discord_app_id) {
-            Ok(_) => tracing::info!("✅ Discord Rich Presence initialized"),
-            Err(e) => tracing::warn!("⚠️  Discord Rich Presence failed to initialize: {}", e),
-        }
-    } else {
-        tracing::info!("ℹ️  Discord Rich Presence not configured (set discord_app_id in main.rs)");
-    }
-
-    let event_loop = EventLoop::new().expect("Failed to create event loop");
-    // Use Wait mode for event-driven rendering (only render when needed)
-    event_loop.set_control_flow(ControlFlow::Wait);
-
-    let mut app = WinitGpuiApp::new(engine_state, window_rx);
-    event_loop.run_app(&mut app).expect("Failed to run event loop");
+    // Run the main event loop
+    profiling::profile_scope!("Engine::EventLoop");
+    event_loop::run_event_loop(engine_context, window_rx);
 }
-

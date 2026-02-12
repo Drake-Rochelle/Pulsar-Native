@@ -8,8 +8,8 @@ use std::thread;
 pub fn run() -> anyhow::Result<()> {
     let bind_addr = "0.0.0.0:8080";
     let listener = TcpListener::bind(bind_addr)?;
-    println!("✅ Simple test server listening on {}", bind_addr);
-    println!("Try: curl http://YOUR_PUBLIC_IP:8080/");
+    tracing::debug!("✅ Simple test server listening on {}", bind_addr);
+    tracing::debug!("Try: curl http://YOUR_PUBLIC_IP:8080/");
     
     for stream in listener.incoming() {
         match stream {
@@ -17,7 +17,7 @@ pub fn run() -> anyhow::Result<()> {
                 thread::spawn(|| handle_client(stream));
             }
             Err(e) => {
-                eprintln!("Connection failed: {}", e);
+                tracing::error!("Connection failed: {}", e);
             }
         }
     }
@@ -27,12 +27,12 @@ pub fn run() -> anyhow::Result<()> {
 
 fn handle_client(mut stream: TcpStream) {
     let peer_addr = stream.peer_addr().unwrap();
-    println!("✅ Connection from: {}", peer_addr);
+    tracing::debug!("✅ Connection from: {}", peer_addr);
     
     let mut buffer = [0; 1024];
     match stream.read(&mut buffer) {
         Ok(size) => {
-            println!("📨 Received {} bytes from {}", size, peer_addr);
+            tracing::debug!("📨 Received {} bytes from {}", size, peer_addr);
             
             // Send HTTP response
             let body = "Simple test server works!\n";
@@ -47,13 +47,13 @@ fn handle_client(mut stream: TcpStream) {
             );
             
             if let Err(e) = stream.write_all(response.as_bytes()) {
-                eprintln!("Failed to send response: {}", e);
+                tracing::error!("Failed to send response: {}", e);
             } else {
-                println!("✅ Sent response to {}", peer_addr);
+                tracing::debug!("✅ Sent response to {}", peer_addr);
             }
         }
         Err(e) => {
-            eprintln!("Failed to read from {}: {}", peer_addr, e);
+            tracing::error!("Failed to read from {}: {}", peer_addr, e);
         }
     }
 }

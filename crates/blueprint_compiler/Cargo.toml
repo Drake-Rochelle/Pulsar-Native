@@ -1,0 +1,20 @@
+[package]
+name = "blueprint_compiler"
+version = "0.1.0"
+edition = "2021"
+authors = ["Pulsar Team"]
+description = "Blueprint graph compiler for Pulsar - integrates PBGC with the engine"
+license = "MIT"
+
+[dependencies]
+# Core Blueprint compiler (from PBGC repo)
+pbgc = { git = "https://github.com/Far-Beyond-Pulsar/PBGC", rev = "6ba336a1a90f19766ee0493cd6c3d415d8bd6438" }
+
+# Also need direct access to Graphy for traits
+graphy = { git = "https://github.com/Far-Beyond-Pulsar/Graphy", rev = "0cd1d0c0e8420757f98c480ab9c4ab28e2f63ae0" }
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tracing-subscriber = "0.3"

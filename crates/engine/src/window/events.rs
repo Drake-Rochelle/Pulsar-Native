@@ -18,14 +18,53 @@
 //! ```text
 //! Raw Input → Update Target → Interpolate → Smoothed Position
 //!     ↓            ↓              ↓              ↓
-//!   Jumpy      Calculate      Apply         Smooth
-//!   Motion     Velocity       Easing        Motion
+//!   Jumpy       Calculate       Apply          Smooth
+//!   Motion      Velocity        Easing         Motion
 //! ```
 
 use gpui::*;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use winit::event::MouseButton as WinitMouseButton;
+
+/// Extension trait for converting Winit MouseButton to GPUI MouseButton
+///
+/// Provides idiomatic `.to_gpui()` method for type conversion.
+pub trait ToGpuiMouseButton {
+    fn to_gpui(self) -> MouseButton;
+}
+
+impl ToGpuiMouseButton for WinitMouseButton {
+    fn to_gpui(self) -> MouseButton {
+        match self {
+            WinitMouseButton::Left => MouseButton::Left,
+            WinitMouseButton::Right => MouseButton::Right,
+            WinitMouseButton::Middle => MouseButton::Middle,
+            WinitMouseButton::Back => MouseButton::Navigate(NavigationDirection::Back),
+            WinitMouseButton::Forward => MouseButton::Navigate(NavigationDirection::Forward),
+            WinitMouseButton::Other(_) => MouseButton::Left, // Fallback to left for unknown buttons
+        }
+    }
+}
+
+/// Extension trait for converting Winit modifiers to GPUI modifiers
+///
+/// Provides idiomatic `.to_gpui()` method for type conversion.
+pub trait ToGpuiModifiers {
+    fn to_gpui(&self) -> Modifiers;
+}
+
+impl ToGpuiModifiers for winit::keyboard::ModifiersState {
+    fn to_gpui(&self) -> Modifiers {
+        Modifiers {
+            control: self.control_key(),
+            alt: self.alt_key(),
+            shift: self.shift_key(),
+            platform: self.super_key(), // Windows key on Windows, Command on Mac
+            function: false,            // Winit doesn't track function key separately
+        }
+    }
+}
 
 /// Convert Winit MouseButton to GPUI MouseButton
 ///
@@ -34,15 +73,11 @@ use winit::event::MouseButton as WinitMouseButton;
 ///
 /// # Returns
 /// Equivalent GPUI mouse button
+///
+/// # Note
+/// Consider using the extension trait method `button.to_gpui()` for more idiomatic code.
 pub fn convert_mouse_button(button: WinitMouseButton) -> MouseButton {
-    match button {
-        WinitMouseButton::Left => MouseButton::Left,
-        WinitMouseButton::Right => MouseButton::Right,
-        WinitMouseButton::Middle => MouseButton::Middle,
-        WinitMouseButton::Back => MouseButton::Navigate(NavigationDirection::Back),
-        WinitMouseButton::Forward => MouseButton::Navigate(NavigationDirection::Forward),
-        WinitMouseButton::Other(_) => MouseButton::Left, // Fallback to left for unknown buttons
-    }
+    button.to_gpui()
 }
 
 /// Convert Winit keyboard modifiers to GPUI modifiers
@@ -52,14 +87,11 @@ pub fn convert_mouse_button(button: WinitMouseButton) -> MouseButton {
 ///
 /// # Returns
 /// GPUI Modifiers struct
+///
+/// # Note
+/// Consider using the extension trait method `winit_mods.to_gpui()` for more idiomatic code.
 pub fn convert_modifiers(winit_mods: &winit::keyboard::ModifiersState) -> Modifiers {
-    Modifiers {
-        control: winit_mods.control_key(),
-        alt: winit_mods.alt_key(),
-        shift: winit_mods.shift_key(),
-        platform: winit_mods.super_key(), // Windows key on Windows, Command on Mac
-        function: false,                  // Winit doesn't track function key separately
-    }
+    winit_mods.to_gpui()
 }
 
 /// Simple click state tracking for double-click detection
@@ -73,7 +105,7 @@ pub fn convert_modifiers(winit_mods: &winit::keyboard::ModifiersState) -> Modifi
 /// let mut click_state = SimpleClickState::new();
 /// let click_count = click_state.update(MouseButton::Left, position);
 /// if click_count == 2 {
-///     println!("Double click!");
+///     tracing::debug!("Double click!");
 /// }
 /// ```
 #[derive(Debug, Clone)]
@@ -122,7 +154,7 @@ impl SimpleClickState {
     /// Click count: 1 for single click, 2 for double, 3 for triple, etc.
     pub fn update(&mut self, button: MouseButton, position: Point<Pixels>) -> usize {
         let now = Instant::now();
-        
+
         // Calculate distance using pixel operations
         let dx = (position.x - self.last_click_position.x).abs();
         let dy = (position.y - self.last_click_position.y).abs();
@@ -141,7 +173,7 @@ impl SimpleClickState {
         self.last_button = button;
         self.last_click_time = now;
         self.last_click_position = position;
-        
+
         self.current_count
     }
 }
@@ -170,7 +202,7 @@ impl Default for SimpleClickState {
 ///
 /// ```rust,ignore
 /// let mut smoother = MotionSmoother::new();
-/// 
+///
 /// // On mouse move
 /// smoother.update_target(new_position);
 /// if smoother.should_send_event() {

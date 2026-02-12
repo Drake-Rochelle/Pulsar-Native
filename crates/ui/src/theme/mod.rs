@@ -40,8 +40,9 @@ impl ActiveTheme for App {
 pub struct Theme {
     pub colors: ThemeColor,
     pub highlight_theme: Arc<HighlightTheme>,
+    // TODO: these ARE NOT SEND+SYNC because of Rc - fix later
     pub light_theme: Rc<ThemeConfig>,
-    pub dark_theme: Rc<ThemeConfig>,
+    pub dark_theme:  Rc<ThemeConfig>,
 
     pub mode: ThemeMode,
     pub font_family: SharedString,
@@ -83,14 +84,23 @@ impl DerefMut for Theme {
 impl Global for Theme {}
 
 // Global function pointer for plugin theme accessor (set by export_plugin! macro)
-static PLUGIN_THEME_ACCESSOR: std::sync::atomic::AtomicPtr<()> =
-    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+// The type signature MUST match exactly: unsafe fn() -> Option<&'static Theme>
+// The plugin MUST ensure this function remains valid for its entire lifetime.
+static PLUGIN_THEME_ACCESSOR: std::sync::RwLock<Option<unsafe fn() -> Option<&'static Theme>>> =
+    std::sync::RwLock::new(None);
 
 impl Theme {
     /// Register a plugin theme accessor function
     /// Called automatically by export_plugin! macro
+    ///
+    /// SAFETY: The accessor function MUST:
+    /// - Match the signature: unsafe fn() -> Option<&'static Theme>
+    /// - Remain valid for the entire plugin lifetime
+    /// - Return None if theme is unavailable
+    /// - Not panic
     pub fn register_plugin_accessor(accessor: unsafe fn() -> Option<&'static Theme>) {
-        PLUGIN_THEME_ACCESSOR.store(accessor as *mut (), std::sync::atomic::Ordering::Release);
+        // Store the function pointer directly in the RwLock
+        *PLUGIN_THEME_ACCESSOR.write().unwrap() = Some(accessor);
     }
 
     /// Returns the global theme reference
@@ -102,12 +112,13 @@ impl Theme {
             Some(theme) => theme,
             None => {
                 // If we're in a plugin context, try the plugin accessor
-                let accessor_ptr = PLUGIN_THEME_ACCESSOR.load(std::sync::atomic::Ordering::Acquire);
-                if !accessor_ptr.is_null() {
-                    let accessor: unsafe fn() -> Option<&'static Theme> =
-                        unsafe { std::mem::transmute(accessor_ptr) };
-                    if let Some(theme) = unsafe { accessor() } {
-                        return theme;
+                if let Ok(accessor_guard) = PLUGIN_THEME_ACCESSOR.read() {
+                    if let Some(accessor) = *accessor_guard {
+                        // Call the accessor (it returns None if theme unavailable)
+                        // SAFETY: The plugin registered this function and guarantees it's valid
+                        if let Some(theme) = unsafe { accessor() } {
+                            return theme;
+                        }
                     }
                 }
 

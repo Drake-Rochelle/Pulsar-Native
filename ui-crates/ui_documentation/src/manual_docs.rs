@@ -1,13 +1,9 @@
 use gpui::{prelude::*, *};
-use ui::{
-    h_flex, v_flex, IconName, Icon, StyledExt, ActiveTheme,
-    button::{Button, ButtonVariants as _},
-    input::{InputState, InputEvent, TextInput},
-    text::TextView,
-};
+use ui::input::{InputState, TabSize};
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::collections::HashSet;
+use regex::Regex;
 
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -38,9 +34,25 @@ pub struct ManualDocsState {
 }
 
 impl ManualDocsState {
+    pub fn file_entries(&self) -> Vec<FileEntry> {
+        self.visible_entries
+            .iter()
+            .map(|&idx| self.file_tree[idx].clone())
+            .collect()
+    }
+
     pub fn new(window: &mut Window, cx: &mut App, project_root: Option<PathBuf>) -> Self {
         let editor_input_state = cx.new(|cx| {
+            // Create code editor for markdown editing
             InputState::new(window, cx)
+                .code_editor("markdown")
+                .line_number(true)
+                .minimap(true)
+                .tab_size(TabSize {
+                    tab_size: 4,
+                    hard_tabs: false,
+                })
+                .soft_wrap(true)
         });
 
         let mut state = Self {
@@ -144,30 +156,83 @@ impl ManualDocsState {
         self.load_file_tree();
     }
 
-    pub fn select_file(&mut self, path: PathBuf) {
+    pub fn select_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut App) {
         self.selected_file = Some(path.clone());
 
+        // Load file into editor
         if let Ok(content) = fs::read_to_string(&path) {
+            self.editor_input_state.update(cx, |editor, cx| {
+                editor.set_value(content.clone(), window, cx);
+            });
             self.current_markdown = content.clone();
-            self.markdown_preview = content;
+            self.markdown_preview = self.resolve_image_urls(&content);
         }
     }
 
-    pub fn update_preview(&mut self, content: String) {
+    pub fn update_preview(&mut self, cx: &App) {
+        // Get content from editor and update preview
+        let content = self.editor_input_state.read(cx).value().to_string();
         self.current_markdown = content.clone();
-        self.markdown_preview = content;
+        self.markdown_preview = self.resolve_image_urls(&content);
     }
 
-    pub fn save_current_file(&mut self) -> Result<(), std::io::Error> {
+    fn resolve_image_urls(&self, markdown: &str) -> String {
+        // Resolve relative image URLs to absolute file:// URLs
+        let Some(selected_file) = &self.selected_file else {
+            return markdown.to_string();
+        };
+
+        let Some(base_dir) = selected_file.parent() else {
+            return markdown.to_string();
+        };
+
+        // Regex to match markdown images: ![alt](url)
+        let re = Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
+
+        re.replace_all(markdown, |caps: &regex::Captures| {
+            let alt = &caps[1];
+            let url = &caps[2];
+
+            // Skip if already absolute URL (http://, https://, file://)
+            if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://") {
+                return caps[0].to_string();
+            }
+
+            // Resolve relative path
+            let image_path = base_dir.join(url);
+            if let Ok(absolute_path) = image_path.canonicalize() {
+                // Convert to file:// URL with proper path format
+                #[cfg(target_os = "windows")]
+                let file_url = format!("file:///{}", absolute_path.display().to_string().replace("\\", "/"));
+                #[cfg(not(target_os = "windows"))]
+                let file_url = format!("file://{}", absolute_path.display());
+
+                format!("![{}]({})", alt, file_url)
+            } else {
+                // If file doesn't exist, keep original
+                caps[0].to_string()
+            }
+        }).to_string()
+    }
+
+    pub fn save_current_file(&mut self, _window: &mut Window, cx: &App) -> Result<(), std::io::Error> {
         let Some(path) = &self.selected_file else {
             return Ok(());
         };
 
+        // Get content from editor and save
+        let content = self.editor_input_state.read(cx).value().to_string();
+        self.current_markdown = content.clone();
+
         fs::write(path, &self.current_markdown)?;
+
+        // Update preview after save
+        self.markdown_preview = self.current_markdown.clone();
+
         Ok(())
     }
 
-    pub fn create_new_file(&mut self, name: String) -> Result<(), std::io::Error> {
+    pub fn create_new_file(&mut self, name: String, window: &mut Window, cx: &mut App) -> Result<(), std::io::Error> {
         let Some(docs_folder) = &self.docs_folder else {
             return Ok(());
         };
@@ -189,7 +254,7 @@ impl ManualDocsState {
 
         fs::write(&file_path, format!("# {}\n\n", name.trim_end_matches(".md")))?;
         self.load_file_tree();
-        self.select_file(file_path);
+        self.select_file(file_path, window, cx);
 
         Ok(())
     }

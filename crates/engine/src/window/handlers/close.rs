@@ -21,18 +21,20 @@ pub fn handle_close_requested(
     event_loop: &ActiveEventLoop,
     window_id: WindowId,
 ) {
-    println!("\n🚪 Closing window...");
+    tracing::debug!("\n🚪 Closing window...");
 
     // Clean up window-specific GPU renderer
-    let window_id_u64 = unsafe { std::mem::transmute::<_, u64>(window_id) };
-    app.engine_state.remove_window_gpu_renderer(window_id_u64);
+    if let Some(window_id_u64) = app.window_id_map.get_id(&window_id) {
+        app.engine_context.renderers.unregister(window_id_u64);
+    }
 
+    app.window_id_map.remove(&window_id);
     app.windows.remove(&window_id);
-    app.engine_state.decrement_window_count();
+    *app.engine_context.window_count.lock() -= 1;
 
     // Exit application if no windows remain
     if app.windows.is_empty() {
-        println!("🚪 No windows remain, exiting application...");
+        tracing::debug!("🚪 No windows remain, exiting application...");
         event_loop.exit();
     }
 }

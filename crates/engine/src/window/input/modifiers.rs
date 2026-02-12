@@ -6,7 +6,7 @@
 use gpui::*;
 use winit::keyboard::ModifiersState;
 use winit::window::WindowId;
-use crate::window::{WinitGpuiApp, convert_modifiers};
+use crate::window::{WinitGpuiApp, ToGpuiModifiers};
 
 /// Handle keyboard modifier state changes
 ///
@@ -23,13 +23,14 @@ pub fn handle_modifiers_changed(
     window_id: WindowId,
     new_modifiers: ModifiersState,
 ) {
+    profiling::profile_scope!("Input::Modifiers");
     // Get the window state
     let Some(window_state) = app.windows.get_mut(&window_id) else {
         return;
     };
 
-    // Update tracked modifiers
-    window_state.current_modifiers = convert_modifiers(&new_modifiers);
+    // Update tracked modifiers (using extension trait)
+    window_state.current_modifiers = new_modifiers.to_gpui();
 
     // Forward modifier changes to GPUI
     if let Some(gpui_window_ref) = window_state.gpui_window.as_ref() {

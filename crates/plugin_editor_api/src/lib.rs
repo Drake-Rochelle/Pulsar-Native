@@ -43,7 +43,8 @@
 //!             id: FileTypeId::new("my-file"),
 //!             extension: "myfile".into(),
 //!             display_name: "My File".into(),
-//!             icon: FileIcon::Code,
+//!             icon: ui::IconName::Code,
+//!             color: gpui::rgb(0x2196F3),
 //!             structure: FileStructure::Standalone,
 //!             default_content: serde_json::json!({"version": 1}),
 //!         }]
@@ -73,6 +74,25 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+/// Logger object for plugin-side tracing/logging.
+#[derive(Debug, Clone, Copy)]
+pub struct EditorLogger;
+
+impl EditorLogger {
+    pub fn info(&self, msg: &str) {
+        // Placeholder for tracing::info! or similar
+        // tracing::info!("{}", msg);
+    }
+    pub fn warn(&self, msg: &str) {
+        // Placeholder for tracing::warn! or similar
+    }
+    pub fn error(&self, msg: &str) {
+        // Placeholder for tracing::error! or similar
+    }
+    pub fn debug(&self, msg: &str) {
+        // Placeholder for tracing::debug! or similar
+    }
+}
 use std::fmt;
 use std::path::PathBuf;
 
@@ -81,6 +101,160 @@ pub use ui::dock::Panel;
 
 // Re-export for plugins to use
 pub use serde_json::Value as JsonValue;
+
+// ============================================================================
+// Statusbar Button System
+// ============================================================================
+
+/// Represents the position where a statusbar button should be placed
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StatusbarPosition {
+    /// Left side of the statusbar (with drawer buttons)
+    Left,
+    /// Right side of the statusbar (with analyzer status)
+    Right,
+}
+
+/// Action to perform when a statusbar button is clicked
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StatusbarAction {
+    /// Open an editor by its EditorId in the tab system
+    OpenEditor {
+        editor_id: EditorId,
+        /// Optional file path to open. If None, creates a new empty editor.
+        file_path: Option<PathBuf>,
+    },
+    
+    /// Toggle visibility of a drawer/panel
+    ToggleDrawer {
+        /// Unique identifier for the drawer
+        drawer_id: String,
+    },
+    
+    /// Execute a custom callback (function pointer provided by plugin)
+    /// The callback receives (Window, App) and can perform any action
+    Custom,
+}
+
+/// Unique identifier for a statusbar button
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StatusbarButtonId(String);
+
+impl StatusbarButtonId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for StatusbarButtonId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Definition of a statusbar button that a plugin can register
+#[derive(Clone)]
+pub struct StatusbarButtonDefinition {
+    /// Unique identifier for this button
+    pub id: StatusbarButtonId,
+    
+    /// Icon to display
+    pub icon: ui::IconName,
+    
+    /// Tooltip text shown on hover
+    pub tooltip: String,
+    
+    /// Position in the statusbar
+    pub position: StatusbarPosition,
+    
+    /// Optional badge count to display (e.g., error count)
+    pub badge_count: Option<u32>,
+    
+    /// Optional badge color (if None, uses default theme color)
+    pub badge_color: Option<gpui::Hsla>,
+    
+    /// Action to perform when clicked
+    pub action: StatusbarAction,
+    
+    /// Optional custom callback for Custom action type
+    /// This is a function pointer that will be called when the button is clicked
+    /// SAFETY: The plugin must ensure this function pointer remains valid
+    pub custom_callback: Option<fn(&mut Window, &mut App)>,
+    
+    /// Priority for ordering (higher = further right/left, depending on position)
+    pub priority: i32,
+    
+    /// Whether the button is currently active/selected
+    pub active: bool,
+    
+    /// Optional custom color for the icon
+    pub icon_color: Option<gpui::Hsla>,
+}
+
+impl StatusbarButtonDefinition {
+    /// Create a new statusbar button definition
+    pub fn new(
+        id: impl Into<String>,
+        icon: ui::IconName,
+        tooltip: impl Into<String>,
+        position: StatusbarPosition,
+        action: StatusbarAction,
+    ) -> Self {
+        Self {
+            id: StatusbarButtonId::new(id),
+            icon,
+            tooltip: tooltip.into(),
+            position,
+            badge_count: None,
+            badge_color: None,
+            action,
+            custom_callback: None,
+            priority: 0,
+            active: false,
+            icon_color: None,
+        }
+    }
+    
+    /// Set the badge count
+    pub fn with_badge(mut self, count: u32) -> Self {
+        self.badge_count = Some(count);
+        self
+    }
+    
+    /// Set the badge color
+    pub fn with_badge_color(mut self, color: gpui::Hsla) -> Self {
+        self.badge_color = Some(color);
+        self
+    }
+    
+    /// Set the custom callback (for Custom action type)
+    pub fn with_callback(mut self, callback: fn(&mut Window, &mut App)) -> Self {
+        self.custom_callback = Some(callback);
+        self
+    }
+    
+    /// Set the priority
+    pub fn with_priority(mut self, priority: i32) -> Self {
+        self.priority = priority;
+        self
+    }
+    
+    /// Set whether the button is active
+    pub fn with_active(mut self, active: bool) -> Self {
+        self.active = active;
+        self
+    }
+    
+    /// Set a custom icon color
+    pub fn with_icon_color(mut self, color: gpui::Hsla) -> Self {
+        self.icon_color = Some(color);
+        self
+    }
+}
 
 // ============================================================================
 // Version Information
@@ -318,56 +492,13 @@ pub enum PathTemplate {
     },
     /// Create a folder
     Folder {
+        //TODO: Consider adding nested templates for subfolders
         path: String,
     },
 }
 
-/// Icon to display for a file type in the file drawer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum FileIcon {
-    // Common icons
-    File,
-    Code,
-    Component,
-    Database,
-    Music,
-    Image,
-    Video,
-    Audio,
-    Archive,
-    Document,
-
-    // Programming language icons
-    Rust,
-    Python,
-    JavaScript,
-    TypeScript,
-    Cpp,
-    CSharp,
-    Go,
-
-    // Asset types
-    Model3D,
-    Texture,
-    Material,
-    Animation,
-    Particle,
-    Level,
-    Prefab,
-
-    // Type system
-    Struct,
-    Enum,
-    Trait,
-    Interface,
-    Class,
-
-    // Custom icon (base64 encoded PNG/SVG)
-    Custom(String),
-}
-
 /// Complete definition of a file type that a plugin supports.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FileTypeDefinition {
     /// Unique identifier for this file type
     pub id: FileTypeId,
@@ -380,7 +511,10 @@ pub struct FileTypeDefinition {
     pub display_name: String,
 
     /// Icon to show in the file drawer
-    pub icon: FileIcon,
+    pub icon: ui::IconName,
+
+    /// Color for the icon
+    pub color: gpui::Hsla,
 
     /// Whether this is a standalone file or folder-based
     pub structure: FileStructure,
@@ -388,6 +522,11 @@ pub struct FileTypeDefinition {
     /// Default content for new files (as JSON)
     /// For folder-based files, this is the content of the marker file
     pub default_content: serde_json::Value,
+
+    /// Optional category path for organizing in the create menu
+    /// Examples: vec!["Data"], vec!["Data", "SQLite"], vec!["Scripts", "Web"]
+    /// Leave empty for top-level menu items
+    pub categories: Vec<String>,
 }
 
 // ============================================================================
@@ -563,15 +702,23 @@ pub trait EditorPlugin: Send + Sync {
     ///
     /// # Returns
     ///
-    /// Returns the editor wrapped for tab system integration, plus the EditorInstance for file operations.
-    /// The panel can be added directly to the tab system.
+    /// Returns a Weak reference to the editor panel (plugin holds the strong Arc to prevent
+    /// memory leaks across DLL boundaries), plus the EditorInstance for file operations.
+    /// The caller should upgrade the Weak reference when accessing the panel.
+    ///
+    /// # Memory Management
+    ///
+    /// The plugin maintains strong Arc references internally. When the plugin is unloaded,
+    /// all strong references are dropped, invalidating the Weak references held by the main app.
+    /// This prevents Arc reference count leaks across DLL boundaries.
     fn create_editor(
         &self,
         editor_id: EditorId,
         file_path: PathBuf,
         window: &mut Window,
         cx: &mut App,
-    ) -> Result<(std::sync::Arc<dyn ui::dock::PanelView>, Box<dyn EditorInstance>), PluginError>;
+        logger: &EditorLogger,
+    ) -> Result<(std::sync::Weak<dyn ui::dock::PanelView>, Box<dyn EditorInstance>), PluginError>;
 
     /// Called when the plugin is loaded.
     ///
@@ -582,6 +729,36 @@ pub trait EditorPlugin: Send + Sync {
     ///
     /// Use this for cleanup.
     fn on_unload(&mut self) {}
+    
+    /// Get statusbar buttons this plugin wants to register.
+    ///
+    /// This is optional - plugins that don't need statusbar buttons can use the default implementation.
+    /// Buttons are registered when the plugin loads and can be updated by returning different values.
+    ///
+    /// # Returns
+    ///
+    /// A vector of statusbar button definitions. Return an empty vector if no buttons are needed.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// fn statusbar_buttons(&self) -> Vec<StatusbarButtonDefinition> {
+    ///     vec![
+    ///         StatusbarButtonDefinition::new(
+    ///             "my-plugin.toggle-panel",
+    ///             ui::IconName::Code,
+    ///             "Toggle My Panel",
+    ///             StatusbarPosition::Left,
+    ///             StatusbarAction::ToggleDrawer { drawer_id: "my-panel".into() },
+    ///         )
+    ///         .with_priority(100)
+    ///         .with_badge(error_count),
+    ///     ]
+    /// }
+    /// ```
+    fn statusbar_buttons(&self) -> Vec<StatusbarButtonDefinition> {
+        Vec::new()
+    }
 }
 
 // ============================================================================
@@ -592,12 +769,14 @@ pub trait EditorPlugin: Send + Sync {
 ///
 /// Plugins must export a function with this signature named `_plugin_create`.
 /// The theme_ptr is passed immediately to ensure globals are available.
-pub type PluginCreate = unsafe extern "C" fn(theme_ptr: *const std::ffi::c_void) -> *mut dyn EditorPlugin;
-
+pub type PluginCreate = unsafe extern "C" fn(theme_ptr: *const std::ffi::c_void) -> Option<&'static mut dyn EditorPlugin>;
 /// Type alias for the plugin destructor function.
 ///
 /// Plugins must export a function with this signature named `_plugin_destroy`.
 pub type PluginDestroy = unsafe extern "C" fn(*mut dyn EditorPlugin);
+
+
+pub type SetupLogger = unsafe extern "C" fn(logger: &'static dyn tracing::Subscriber);
 
 /// Macro to export a plugin from a dynamic library.
 ///
@@ -618,30 +797,60 @@ pub type PluginDestroy = unsafe extern "C" fn(*mut dyn EditorPlugin);
 macro_rules! export_plugin {
     ($plugin_type:ty) => {
         // Static storage for synced Theme data from main app (stored as usize for thread safety)
+        // SAFETY CONTRACT: The main app MUST ensure the Theme pointer remains valid for the
+        // entire lifetime of the plugin. The Theme must NOT be moved or dropped while the
+        // plugin is loaded. This is guaranteed by the PluginManager keeping Theme in a
+        // stable location.
         static SYNCED_THEME: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
 
         #[no_mangle]
-        pub unsafe extern "C" fn _plugin_create(theme_ptr: *const std::ffi::c_void) -> *mut dyn $crate::EditorPlugin {
-            // Initialize globals immediately before creating plugin to prevent race conditions
-            SYNCED_THEME.set(theme_ptr as usize).ok();
-
-            // Register the plugin theme accessor with the ui crate
+        pub unsafe extern "C" fn _plugin_create(theme_ptr: *const std::ffi::c_void) -> Option<&'static mut dyn $crate::EditorPlugin>{
+            if theme_ptr.is_null() {
+                tracing::error!("[Plugin] ERROR: Received null theme pointer from host!");
+                return None;
+            }
+            if SYNCED_THEME.set(theme_ptr as usize).is_err() {
+                tracing::error!("[Plugin] ERROR: Theme pointer already initialized!");
+                return None;
+            }
             ui::theme::Theme::register_plugin_accessor(plugin_theme_unsafe);
-
             let plugin = <$plugin_type>::default();
             let boxed: Box<dyn $crate::EditorPlugin> = Box::new(plugin);
-            Box::into_raw(boxed)
+            Some(Box::leak(boxed))
         }
 
         /// Internal accessor for plugin theme (called by ui crate)
+        /// SAFETY: Returns None if theme pointer is null or not initialized.
+        /// The caller (ui crate) must handle None gracefully.
         unsafe fn plugin_theme_unsafe() -> Option<&'static ui::theme::Theme> {
-            get_synced_theme().map(|ptr| &*(ptr as *const ui::theme::Theme))
+            let ptr = get_synced_theme()?;
+
+            // Validate pointer is not null before dereferencing
+            if ptr.is_null() {
+                tracing::error!("[Plugin] ERROR: Theme pointer is null!");
+                return None;
+            }
+
+            // SAFETY: Assuming the host maintains the Theme pointer validity.
+            // This is a cross-DLL contract that must be upheld by PluginManager.
+            Some(&*(ptr as *const ui::theme::Theme))
         }
 
         #[no_mangle]
         pub unsafe extern "C" fn _plugin_destroy(ptr: *mut dyn $crate::EditorPlugin) {
-            if !ptr.is_null() {
-                drop(Box::from_raw(ptr));
+            if ptr.is_null() {
+                tracing::warn!("[Plugin] WARNING: Attempted to destroy null plugin pointer!");
+                return;
+            }
+            use std::alloc::{dealloc, Layout};
+            use std::ptr;
+
+            unsafe {
+                // Read the value to trigger the destructor
+                let _value = ptr::read(ptr as *mut Box<dyn $crate::EditorPlugin> as *const Box<dyn $crate::EditorPlugin>);
+                
+                // Deallocate the memory with correct layout for Box<dyn EditorPlugin>
+                dealloc(ptr as *mut u8, Layout::new::<Box<dyn $crate::EditorPlugin>>());
             }
         }
 
@@ -651,9 +860,20 @@ macro_rules! export_plugin {
         }
 
         /// Initialize the plugin's synced copy of globals from the main app
+        /// This is called before each editor instance creation to ensure fresh state
         #[no_mangle]
         pub unsafe extern "C" fn _plugin_init_globals(theme_ptr: *const std::ffi::c_void) {
-            SYNCED_THEME.set(theme_ptr as usize).ok();
+            // Validate theme pointer
+            if theme_ptr.is_null() {
+                tracing::error!("[Plugin] ERROR: Received null theme pointer in init_globals!");
+                return;
+            }
+
+            // Note: OnceLock.set() will fail if already set, which is fine.
+            // The theme pointer should remain stable across the plugin lifetime.
+            if SYNCED_THEME.get().is_none() {
+                SYNCED_THEME.set(theme_ptr as usize).ok();
+            }
         }
 
         /// Get the synced Theme pointer for use in the plugin
@@ -664,9 +884,20 @@ macro_rules! export_plugin {
 
         /// Plugin-safe theme accessor that uses the synced copy
         /// This bypasses GPUI's TypeId-based global system which doesn't work across DLLs
+        ///
+        /// SAFETY: Returns None if the theme pointer is not initialized or is null.
+        /// The host MUST ensure the Theme remains valid for the plugin's lifetime.
         #[allow(dead_code)]
         pub fn plugin_theme() -> Option<&'static ui::theme::Theme> {
-            get_synced_theme().map(|ptr| unsafe { &*(ptr as *const ui::theme::Theme) })
+            let ptr = get_synced_theme()?;
+
+            // Validate pointer before dereferencing
+            if ptr.is_null() {
+                return None;
+            }
+
+            // SAFETY: Relies on host maintaining Theme pointer validity
+            unsafe { Some(&*(ptr as *const ui::theme::Theme)) }
         }
     };
 }
@@ -680,7 +911,8 @@ pub fn standalone_file_type(
     id: impl Into<String>,
     extension: impl Into<String>,
     display_name: impl Into<String>,
-    icon: FileIcon,
+    icon: ui::IconName,
+    color: gpui::Hsla,
     default_content: serde_json::Value,
 ) -> FileTypeDefinition {
     FileTypeDefinition {
@@ -688,8 +920,10 @@ pub fn standalone_file_type(
         extension: extension.into(),
         display_name: display_name.into(),
         icon,
+        color,
         structure: FileStructure::Standalone,
         default_content,
+        categories: vec![],
     }
 }
 
@@ -698,7 +932,8 @@ pub fn folder_file_type(
     id: impl Into<String>,
     extension: impl Into<String>,
     display_name: impl Into<String>,
-    icon: FileIcon,
+    icon: ui::IconName,
+    color: gpui::Hsla,
     marker_file: impl Into<String>,
     template_structure: Vec<PathTemplate>,
     default_content: serde_json::Value,
@@ -708,10 +943,12 @@ pub fn folder_file_type(
         extension: extension.into(),
         display_name: display_name.into(),
         icon,
+        color,
         structure: FileStructure::FolderBased {
             marker_file: marker_file.into(),
             template_structure,
         },
         default_content,
+        categories: vec![],
     }
 }

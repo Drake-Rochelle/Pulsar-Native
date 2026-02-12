@@ -5,10 +5,12 @@
 use gpui::*;
 use gpui::Hsla;
 use ui::{ActiveTheme, Colorize, Root};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use engine_backend::services::rust_analyzer_manager::{RustAnalyzerManager, AnalyzerStatus, AnalyzerEvent};
-use engine_state::{EngineState, WindowRequest};
+use engine_state::{EngineContext, WindowRequest};
+use ui_entry::entry_screen::recent_projects::{RecentProjectsList, RecentProject};
+use directories::ProjectDirs;
 
 /// Helper function to create a loading screen component wrapped in Root
 pub fn create_loading_component(
@@ -149,12 +151,15 @@ impl LoadingScreen {
             let project_path = self.project_path.clone();
             let rust_analyzer = self.rust_analyzer.clone().expect("Rust Analyzer should be initialized");
 
-            if let Some(engine_state) = EngineState::global() {
-                engine_state.request_window(WindowRequest::ProjectEditor {
+            // Update recent projects list
+            update_recent_projects(&project_path);
+
+            if let Some(engine_context) = EngineContext::global() {
+                engine_context.request_window(WindowRequest::ProjectEditor {
                     project_path: project_path.to_string_lossy().to_string(),
                 });
 
-                engine_state.request_window(WindowRequest::CloseWindow {
+                engine_context.request_window(WindowRequest::CloseWindow {
                     window_id: self.window_id,
                 });
             }
@@ -325,4 +330,36 @@ impl Render for LoadingScreen {
                     )
             )
     }
+}
+
+/// Update recent projects list when a project is successfully loaded
+fn update_recent_projects(project_path: &Path) {
+    // Get recent projects path
+    let Some(proj_dirs) = ProjectDirs::from("com", "Pulsar", "Pulsar_Engine") else {
+        tracing::warn!("Failed to get project directories for recent projects update");
+        return;
+    };
+
+    let data_dir = proj_dirs.data_dir();
+    let recent_projects_path = data_dir.join("recent_projects.json");
+
+    // Load existing recent projects
+    let mut recent_projects = RecentProjectsList::load(&recent_projects_path);
+
+    // Create RecentProject entry
+    let project = RecentProject {
+        name: project_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Unknown")
+            .to_string(),
+        path: project_path.to_string_lossy().to_string(),
+        last_opened: Some(chrono::Local::now().to_rfc3339()),
+        is_git: project_path.join(".git").exists(),
+    };
+
+    // Add/update and save
+    recent_projects.add_or_update(project);
+    recent_projects.save(&recent_projects_path);
+    tracing::debug!("Updated recent projects for: {}", project_path.display());
 }

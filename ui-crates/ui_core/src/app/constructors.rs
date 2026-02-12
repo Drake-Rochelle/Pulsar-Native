@@ -3,7 +3,11 @@
 use std::{path::PathBuf, sync::Arc};
 use gpui::{AppContext, Context, Entity, Window};
 use ui::dock::DockItem;
-use ui_editor::{FileManagerDrawer, LevelEditorPanel, ProblemsDrawer, TerminalDrawer};
+use ui::ContextModal;
+use ui_file_manager::FileManagerDrawer;
+use ui_problems::ProblemsDrawer;
+use ui_level_editor::LevelEditorPanel;
+use ui_type_debugger::TypeDebuggerDrawer;
 use ui_entry::EntryScreen;
 use plugin_manager::PluginManager;
 use engine_backend::services::rust_analyzer_manager::RustAnalyzerManager;
@@ -128,11 +132,27 @@ impl PulsarApp {
 
         // Store project_path before moving it
         let has_project = project_path.is_some();
+        
+        // Set project path in engine_state for access from other crates
+        if let Some(ref path) = project_path {
+            let path_str = path.to_string_lossy().to_string();
+            println!("[ENGINE_STATE DEBUG] ========================================");
+            println!("[ENGINE_STATE DEBUG] Setting project path to: {:?}", path);
+            println!("[ENGINE_STATE DEBUG] As string: {:?}", path_str);
+            engine_state::set_project_path(path_str.clone());
+            println!("[ENGINE_STATE DEBUG] Verification - get_project_path(): {:?}", engine_state::get_project_path());
+            println!("[ENGINE_STATE DEBUG] ========================================");
+            tracing::info!("Set engine project path to {:?}", path);
+        } else {
+            println!("[ENGINE_STATE DEBUG] ========================================");
+            println!("[ENGINE_STATE DEBUG] NO PROJECT PATH - project_path is None");
+            println!("[ENGINE_STATE DEBUG] ========================================");
+        }
 
         // Create drawers
         let file_manager_drawer = cx.new(|cx| FileManagerDrawer::new(project_path.clone(), window, cx));
         let problems_drawer = cx.new(|cx| ProblemsDrawer::new(window, cx));
-        let terminal_drawer = cx.new(|cx| TerminalDrawer::new(window, cx));
+        let type_debugger_drawer = cx.new(|cx| TypeDebuggerDrawer::new(window, cx));
 
         // Subscribe to drawer events
         cx.subscribe_in(&file_manager_drawer, window, event_handlers::on_file_selected).detach();
@@ -159,19 +179,32 @@ impl PulsarApp {
         cx.subscribe_in(&rust_analyzer, window, event_handlers::on_analyzer_event).detach();
 
         // Subscribe to tab panel events
+        println!("[SUBSCRIPTION] Setting up subscription to center_tabs (ID: {:?}) for PanelEvent", center_tabs.entity_id());
         cx.subscribe_in(&center_tabs, window, event_handlers::on_tab_panel_event).detach();
+        println!("[SUBSCRIPTION] Subscription to center_tabs set up successfully");
 
         // Subscribe to entry screen events
         if let Some(screen) = &entry_screen {
             cx.subscribe_in(screen, window, event_handlers::on_project_selected).detach();
         }
 
+        // Initialize palette manager global
+        ui_common::command_palette::PaletteManager::init(cx);
+
         // Initialize plugin manager
-        tracing::info!("🔌 Initializing plugin system");
+        tracing::debug!("🔌 Initializing plugin system");
         let mut plugin_manager = PluginManager::new();
+        
+        // Register built-in editors
+        tracing::debug!("📝 Registering built-in editors");
+        crate::register_all_builtin_editors(plugin_manager.builtin_registry_mut());
+        
+        // Register them with the file type and editor registries
+        plugin_manager.register_builtin_editors();
+        tracing::debug!("✅ Built-in editors registered");
 
         let plugins_dir = std::path::Path::new("plugins/editor");
-        tracing::info!("📂 Loading plugins from: {:?}", plugins_dir);
+        tracing::debug!("📂 Loading plugins from: {:?}", plugins_dir);
 
         match plugin_manager.load_plugins_from_dir(plugins_dir, &*cx) {
             Err(e) => {
@@ -179,14 +212,14 @@ impl PulsarApp {
             }
             Ok(_) => {
                 let loaded_plugins = plugin_manager.get_plugins();
-                tracing::info!("✅ Loaded {} editor plugin(s)", loaded_plugins.len());
+                tracing::debug!("✅ Loaded {} editor plugin(s)", loaded_plugins.len());
                 for plugin in loaded_plugins {
-                    tracing::info!("   📦 {} v{} by {}", plugin.name, plugin.version, plugin.author);
+                    tracing::debug!("   📦 {} v{} by {}", plugin.name, plugin.version, plugin.author);
                 }
             }
         }
 
-        let app = Self {
+        let mut app = Self {
             state: crate::app::state::AppState {
                 dock_area,
                 project_path,
@@ -196,15 +229,15 @@ impl PulsarApp {
                 drawer_height: 400.0,
                 drawer_resizing: false,
                 problems_drawer,
-                terminal_drawer,
+                type_debugger_drawer,
                 center_tabs,
-                script_editor: None,
-                daw_editors: Vec::new(),
-                database_editors: Vec::new(),
-                struct_editors: Vec::new(),
-                enum_editors: Vec::new(),
-                trait_editors: Vec::new(),
-                alias_editors: Vec::new(),
+                // script_editor: None, // Migrated to plugins
+                // daw_editors: Vec::new(),
+                // database_editors: Vec::new(),
+                // struct_editors: Vec::new(),
+                // enum_editors: Vec::new(),
+                // trait_editors: Vec::new(),
+                // alias_editors: Vec::new(),
                 next_tab_id: 1,
                 plugin_manager,
                 rust_analyzer,
@@ -214,15 +247,162 @@ impl PulsarApp {
                 window_id,
                 shown_welcome_notification: false,
                 command_palette_open: false,
+                command_palette_id: None,
                 command_palette: None,
-                active_type_picker_editor: None,
+                command_palette_view: None,
+                // active_type_picker_editor: None, // Migrated to plugins
                 focus_handle: cx.focus_handle(),
             },
         };
 
+        // Update file manager drawer with registered file types from plugin manager
+        let file_types: Vec<plugin_editor_api::FileTypeDefinition> = app.state.plugin_manager
+            .file_type_registry()
+            .get_all_file_types()
+            .into_iter()
+            .cloned()
+            .collect();
+
+        app.state.file_manager_drawer.update(cx, |drawer, cx| {
+            drawer.update_file_types(file_types);
+            cx.notify();
+        });
+
+        // Sync TypeDatabase to UI if we have a project
+        if has_project {
+            if let Some(engine_state) = engine_state::EngineState::global() {
+                if let Some(type_database) = engine_state.type_database() {
+                    let types = type_database.all();
+                    tracing::debug!("📊 Syncing {} types to TypeDebuggerDrawer", types.len());
+                    app.state.type_debugger_drawer.update(cx, |drawer, cx| {
+                        drawer.set_types(types, cx);
+                    });
+                }
+            }
+            
+            // Set project root for problems drawer to display relative paths
+            app.state.problems_drawer.update(cx, |drawer, cx| {
+                drawer.set_project_root(app.state.project_path.clone(), cx);
+            });
+
+            // Set project root for type debugger drawer to display relative paths
+            app.state.type_debugger_drawer.update(cx, |drawer, cx| {
+                drawer.set_project_root(app.state.project_path.clone(), cx);
+            });
+        }
+
         // Update Discord presence with initial tab if project is loaded
         if has_project && create_level_editor {
             app.update_discord_presence(cx);
+        }
+
+        // Register command palette
+        {
+            use ui_common::command_palette::PaletteManager;
+            use ui::IconName;
+            use crate::actions::*;
+
+            let (palette_id, palette_ref) = PaletteManager::register_palette("commands", window, cx);
+
+            // Populate with command items
+            palette_ref.update(cx, |palette, cx| {
+                palette.add_item(
+                    "Toggle File Manager",
+                    "Show or hide the file manager panel",
+                    IconName::Folder,
+                    "View",
+                    |window, cx| {
+                        window.dispatch_action(Box::new(ToggleFileManager), cx);
+                    },
+                    cx,
+                );
+
+                palette.add_item(
+                    "Open Settings",
+                    "Open application settings",
+                    IconName::Settings,
+                    "Application",
+                    |window, cx| {
+                        window.dispatch_action(Box::new(ui::OpenSettings), cx);
+                    },
+                    cx,
+                );
+
+                palette.add_item(
+                    "Toggle Multiplayer",
+                    "Enable or disable multiplayer collaboration",
+                    IconName::User,
+                    "Application",
+                    |window, cx| {
+                        window.dispatch_action(Box::new(ToggleMultiplayer), cx);
+                    },
+                    cx,
+                );
+
+                palette.add_item(
+                    "Toggle Problems",
+                    "Show or hide the problems panel",
+                    IconName::TriangleAlert,
+                    "View",
+                    |window, cx| {
+                        window.dispatch_action(Box::new(ToggleProblems), cx);
+                    },
+                    cx,
+                );
+
+                palette.add_item(
+                    "Build Project",
+                    "Build the current project",
+                    IconName::Hammer,
+                    "Project",
+                    |window, cx| {
+                        window.push_notification(
+                            ui::notification::Notification::info("Build")
+                                .message("Building project..."),
+                            cx
+                        );
+                    },
+                    cx,
+                );
+
+                palette.add_item(
+                    "Run Project",
+                    "Run the current project",
+                    IconName::Play,
+                    "Project",
+                    |window, cx| {
+                        window.push_notification(
+                            ui::notification::Notification::info("Run")
+                                .message("Running project..."),
+                            cx
+                        );
+                    },
+                    cx,
+                );
+
+                // Add files if we have a project path
+                if let Some(ref project_path) = app.state.project_path {
+                    use ui_common::file_utils::find_openable_files;
+                    let files = find_openable_files(project_path, Some(1000));
+
+                    for file in files {
+                        let path = file.path.clone();
+                        palette.add_item(
+                            file.name.clone(),
+                            file.path.to_string_lossy().to_string(),
+                            IconName::SubmitDocument,
+                            "Files",
+                            move |window, cx| {
+                                window.dispatch_action(Box::new(OpenFile { path: path.clone() }), cx);
+                            },
+                            cx,
+                        );
+                    }
+                }
+            });
+
+            app.state.command_palette_id = Some(palette_id);
+            app.state.command_palette = Some(palette_ref);
         }
 
         app

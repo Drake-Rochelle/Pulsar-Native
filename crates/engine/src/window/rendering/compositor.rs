@@ -3,9 +3,13 @@
 //! This module contains the complete D3D11 composition logic for rendering
 //! multiple layers (background, Bevy 3D, GPUI UI) to the screen with zero-copy
 //! GPU texture sharing.
+//! 
+//! WARNING: This module is Windows-only and will soon be depricated as we
+//!          transition to WGPUI which will allow gpui-internal surfaces
 
 use winit::window::WindowId;
 use crate::window::WinitGpuiApp;
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicBool, Ordering};
 
 #[cfg(target_os = "windows")]
 use windows::{
@@ -40,8 +44,28 @@ use windows::{
 /// * `window_id` - ID of the window to redraw
 #[cfg(target_os = "windows")]
 pub unsafe fn handle_redraw(app: &mut WinitGpuiApp, window_id: WindowId) {
+    profiling::profile_scope!("Render::Composite");
+
+    // Track frame time for profiler (thread-safe atomic storing microseconds since program start)
+    use std::time::SystemTime;
+    static LAST_FRAME_TIME_MICROS: AtomicU64 = AtomicU64::new(0);
+
+    let now_micros = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as u64;
+
+    let last_micros = LAST_FRAME_TIME_MICROS.swap(now_micros, Ordering::Relaxed);
+    if last_micros != 0 {
+        let frame_time_ms = (now_micros.saturating_sub(last_micros)) as f32 / 1000.0;
+        profiling::record_frame_time(frame_time_ms);
+    }
+    
     // Claim Bevy renderer first (needs mutable app reference)
-    claim_bevy_renderer(app, &window_id);
+    {
+        profiling::profile_scope!("Render::ClaimBevy");
+        claim_helio_renderer(app, &window_id);
+    }
 
     // Now get window state mutably
     let window_state = app.windows.get_mut(&window_id);
@@ -51,37 +75,48 @@ pub unsafe fn handle_redraw(app: &mut WinitGpuiApp, window_id: WindowId) {
 
     let should_render_gpui = window_state.needs_render;
 
-    // Diagnostic: Show decoupled rendering rates
-    static mut COMPOSITOR_FRAME_COUNT: u32 = 0;
-    static mut GPUI_FRAME_COUNT: u32 = 0;
-    COMPOSITOR_FRAME_COUNT += 1;
+    // Diagnostic: Show decoupled rendering rates (thread-safe atomics)
+    static COMPOSITOR_FRAME_COUNT: AtomicU32 = AtomicU32::new(0);
+    static GPUI_FRAME_COUNT: AtomicU32 = AtomicU32::new(0);
+    COMPOSITOR_FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
     if should_render_gpui {
-        GPUI_FRAME_COUNT += 1;
+        GPUI_FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 
     // Render GPUI if needed
     if should_render_gpui {
+        profiling::profile_scope!("GPU::GPUI::Render");
         if let Some(gpui_window_ref) = &window_state.gpui_window {
-            let _ = window_state.gpui_app.update(|app| {
-                app.refresh_windows();
-            });
-            let _ = window_state.gpui_app.update(|app| {
-                app.draw_windows();
-            });
+            {
+                profiling::profile_scope!("GPU::GPUI::RefreshWindows");
+                let _ = window_state.gpui_app.update(|app| {
+                    app.refresh_windows();
+                });
+            }
+            {
+                profiling::profile_scope!("GPU::GPUI::DrawWindows");
+                let _ = window_state.gpui_app.update(|app| {
+                    app.draw_windows();
+                });
+            }
         }
         window_state.needs_render = false;
     }
 
     // Lazy initialization of shared texture on first render
     if !window_state.shared_texture_initialized && window_state.gpui_window.is_some() && window_state.d3d_device.is_some() {
+        profiling::profile_scope!("GPU::Compositor::InitSharedTexture");
         initialize_shared_texture(window_state);
     }
 
     // Perform D3D11 composition
-    compose_frame(window_state, should_render_gpui);
+    {
+        profiling::profile_scope!("GPU::Compositor::ComposeFrame");
+        compose_frame(window_state, should_render_gpui);
+    }
 
     // Request continuous redraws if we have a Bevy renderer
-    if window_state.bevy_renderer.is_some() {
+    if window_state.helio_renderer.is_some() {
         window_state.winit_window.request_redraw();
     }
 }
@@ -94,8 +129,15 @@ pub fn handle_redraw(_app: &mut WinitGpuiApp, _window_id: WindowId) {
 
 #[cfg(target_os = "windows")]
 unsafe fn initialize_shared_texture(window_state: &mut crate::window::WindowState) {
-    let gpui_window_ref = window_state.gpui_window.as_ref().unwrap();
-    let device = window_state.d3d_device.as_ref().unwrap();
+    let Some(gpui_window_ref) = window_state.gpui_window.as_ref() else {
+        tracing::error!("❌ Cannot initialize shared texture: GPUI window not available");
+        return;
+    };
+
+    let Some(device) = window_state.d3d_device.as_ref() else {
+        tracing::error!("❌ Cannot initialize shared texture: D3D11 device not available");
+        return;
+    };
 
     let handle_result = window_state.gpui_app.update(|app| {
         gpui_window_ref.update(app, |_view, window, _cx| {
@@ -104,8 +146,8 @@ unsafe fn initialize_shared_texture(window_state: &mut crate::window::WindowStat
     });
 
     if let Ok(opt_handle_ptr) = handle_result {
-        if let Some(handle_ptr) = opt_handle_ptr {
-            println!("✨ Got shared texture handle from GPUI: {:?}", handle_ptr);
+        if let Ok(Some(handle_ptr)) = opt_handle_ptr {
+            tracing::debug!("✨ Got shared texture handle from GPUI: {:?}", handle_ptr);
 
             let handle_value: isize = *(&handle_ptr as *const _ as *const isize);
             let mut texture: Option<ID3D11Texture2D> = None;
@@ -127,58 +169,65 @@ unsafe fn initialize_shared_texture(window_state: &mut crate::window::WindowStat
                         let mut persistent_texture: Option<ID3D11Texture2D> = None;
                         let create_result = device.CreateTexture2D(&desc, None, Some(&mut persistent_texture));
 
-                        if create_result.is_ok() && persistent_texture.is_some() {
-                            let tex = persistent_texture.as_ref().unwrap();
+                        if create_result.is_ok() {
+                            if let Some(tex) = &persistent_texture {
+                                let mut srv: Option<ID3D11ShaderResourceView> = None;
+                                let srv_result = device.CreateShaderResourceView(tex, None, Some(&mut srv));
 
-                            let mut srv: Option<ID3D11ShaderResourceView> = None;
-                            let srv_result = device.CreateShaderResourceView(tex, None, Some(&mut srv));
+                                if srv_result.is_ok() && srv.is_some() {
+                                    window_state.persistent_gpui_srv = srv;
+                                    tracing::debug!("✨ Created cached SRV for persistent texture");
+                                } else {
+                                    tracing::error!("❌ Failed to create SRV: {:?}", srv_result);
+                                }
 
-                            if srv_result.is_ok() && srv.is_some() {
-                                window_state.persistent_gpui_srv = srv;
-                                println!("✨ Created cached SRV for persistent texture");
+                                window_state.persistent_gpui_texture = persistent_texture;
+                                tracing::debug!("✨ Created persistent GPUI texture buffer!");
                             } else {
-                                eprintln!("❌ Failed to create SRV: {:?}", srv_result);
+                                tracing::error!("❌ Persistent texture is None despite successful creation");
                             }
-
-                            window_state.persistent_gpui_texture = persistent_texture;
-                            println!("✨ Created persistent GPUI texture buffer!");
                         } else {
-                            eprintln!("❌ Failed to create persistent texture: {:?}", create_result);
+                            tracing::error!("❌ Failed to create persistent texture: {:?}", create_result);
                         }
 
                         window_state.shared_texture = Some(shared_texture_val);
                         window_state.shared_texture_initialized = true;
-                        println!("✨ Opened shared texture in winit D3D11 device!");
+                        tracing::debug!("✨ Opened shared texture in winit D3D11 device!");
                     }
                 }
                 Err(e) => {
-                    println!("❌ Failed to open shared texture: {:?}", e);
+                    tracing::debug!("❌ Failed to open shared texture: {:?}", e);
                     window_state.shared_texture_initialized = true;
                 }
             }
         } else {
-            println!("⏳ GPUI hasn't created shared texture yet, will retry next frame");
+            tracing::debug!("⏳ GPUI hasn't created shared texture yet, will retry next frame");
         }
     }
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn claim_bevy_renderer(app: &mut WinitGpuiApp, window_id: &WindowId) {
+unsafe fn claim_helio_renderer(app: &mut WinitGpuiApp, window_id: &WindowId) {
     let window_state = app.windows.get_mut(window_id).unwrap();
 
-    if window_state.bevy_renderer.is_none() {
-        let window_id_u64 = std::mem::transmute::<_, u64>(*window_id);
+    if window_state.helio_renderer.is_none() {
+        let Some(window_id_u64) = app.window_id_map.get_id(window_id) else {
+            tracing::warn!("⚠️ Window ID not registered for Bevy renderer claim");
+            return;
+        };
 
-        if let Some(renderer_handle) = app.engine_state.get_window_gpu_renderer(window_id_u64) {
-            if let Ok(gpu_renderer) = renderer_handle.clone().downcast::<std::sync::Mutex<engine_backend::services::gpu_renderer::GpuRenderer>>() {
-                window_state.bevy_renderer = Some(gpu_renderer);
+        // Try to get renderer for this window
+        if let Some(handle) = app.engine_context.renderers.get(window_id_u64) {
+            if let Some(helio_renderer) = handle.as_bevy::<std::sync::Mutex<engine_backend::services::gpu_renderer::GpuRenderer>>() {
+                window_state.helio_renderer = Some(helio_renderer.clone());
             }
-        } else if let Some(renderer_handle) = app.engine_state.get_window_gpu_renderer(0) {
-            if let Ok(gpu_renderer) = renderer_handle.clone().downcast::<std::sync::Mutex<engine_backend::services::gpu_renderer::GpuRenderer>>() {
-                app.engine_state.set_window_gpu_renderer(window_id_u64, gpu_renderer.clone() as std::sync::Arc<dyn std::any::Any + Send + Sync>);
-                app.engine_state.remove_window_gpu_renderer(0);
-                app.engine_state.set_metadata("has_pending_viewport_renderer".to_string(), "false".to_string());
-                window_state.bevy_renderer = Some(gpu_renderer);
+        } else if let Some(handle) = app.engine_context.renderers.get(0) {
+            // Claim renderer from window ID 0 (pending renderer)
+            if let Some(helio_renderer) = handle.as_bevy::<std::sync::Mutex<engine_backend::services::gpu_renderer::GpuRenderer>>() {
+                let new_handle = engine_state::TypedRendererHandle::bevy(window_id_u64, helio_renderer.clone());
+                app.engine_context.renderers.register(window_id_u64, new_handle);
+                app.engine_context.renderers.unregister(0);
+                window_state.helio_renderer = Some(helio_renderer.clone());
             }
         }
     }
@@ -203,14 +252,14 @@ unsafe fn compose_frame(window_state: &mut crate::window::WindowState, should_re
     let Some(input_layout) = window_state.input_layout.clone() else { return };
     let Some(sampler_state) = window_state.sampler_state.clone() else { return };
 
-    // Check device status periodically
-    static mut DEVICE_CHECK_COUNTER: u32 = 0;
-    DEVICE_CHECK_COUNTER += 1;
-    if DEVICE_CHECK_COUNTER % 300 == 0 {
+    // Check device status periodically (thread-safe atomic)
+    static DEVICE_CHECK_COUNTER: AtomicU32 = AtomicU32::new(0);
+    let counter = DEVICE_CHECK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    if counter % 300 == 0 {
         if let Some(device) = window_state.d3d_device.as_ref() {
             let device_reason = device.GetDeviceRemovedReason();
             if device_reason.is_err() {
-                eprintln!("[COMPOSITOR] ⚠️ D3D11 device has been removed! Reason: {:?}", device_reason);
+                tracing::error!("[COMPOSITOR] ⚠️ D3D11 device has been removed! Reason: {:?}", device_reason);
                 window_state.bevy_texture = None;
                 window_state.bevy_srv = None;
             }
@@ -260,24 +309,26 @@ unsafe fn compose_frame(window_state: &mut crate::window::WindowState, should_re
     // Present
     let present_result = swap_chain.Present(1, DXGI_PRESENT(0));
     if present_result.is_err() {
-        static mut PRESENT_ERROR_COUNT: u32 = 0;
-        PRESENT_ERROR_COUNT += 1;
-        if PRESENT_ERROR_COUNT == 1 || PRESENT_ERROR_COUNT % 600 == 0 {
-            eprintln!("[COMPOSITOR] ❌ Present failed: {:?}", present_result);
+        static PRESENT_ERROR_COUNT: AtomicU32 = AtomicU32::new(0);
+        let count = PRESENT_ERROR_COUNT.fetch_add(1, Ordering::Relaxed);
+        if count == 0 || count % 600 == 0 {
+            tracing::error!("[COMPOSITOR] ❌ Present failed: {:?}", present_result);
         }
     }
 }
 
 #[cfg(target_os = "windows")]
 unsafe fn render_bevy_layer(window_state: &mut crate::window::WindowState, context: &ID3D11DeviceContext) {
-    use engine_backend::subsystems::render::NativeTextureHandle;
+    use gpui::GpuTextureHandle;
 
-    let Some(gpu_renderer_arc) = window_state.bevy_renderer.clone() else { return };
+    let Some(gpu_renderer_arc) = window_state.helio_renderer.clone() else { return };
     let Ok(gpu_renderer) = gpu_renderer_arc.lock() else { return };
-    let Some(ref bevy_renderer_inst) = gpu_renderer.bevy_renderer else { return };
-    let Some(native_handle) = bevy_renderer_inst.get_current_native_handle() else { return };
+    let Some(ref helio_renderer_inst) = gpu_renderer.helio_renderer else { return };
+    let Some(gpu_handle) = helio_renderer_inst.get_current_native_handle() else { return };
 
-    let NativeTextureHandle::D3D11(handle_ptr) = native_handle else { return };
+    // GpuTextureHandle stores the handle as an isize internally
+    // We need to access it - for now, assume it's in the native_handle field
+    let handle_ptr = gpu_handle.native_handle as usize;
 
     let mut bevy_texture_local: Option<ID3D11Texture2D> = None;
     let device = window_state.d3d_device.as_ref().unwrap();
@@ -302,21 +353,21 @@ unsafe fn render_bevy_layer(window_state: &mut crate::window::WindowState, conte
         let hresult = e.code().0;
         let is_device_error = hresult == 0x887A0005_u32 as i32 || hresult == 0x887A0006_u32 as i32 || hresult == 0x887A0007_u32 as i32;
 
-        static mut OPEN_ERROR_COUNT: u32 = 0;
-        static mut LAST_WAS_DEVICE_ERROR: bool = false;
-        OPEN_ERROR_COUNT += 1;
+        static OPEN_ERROR_COUNT: AtomicU32 = AtomicU32::new(0);
+        static LAST_WAS_DEVICE_ERROR: AtomicBool = AtomicBool::new(false);
+        let count = OPEN_ERROR_COUNT.fetch_add(1, Ordering::Relaxed);
 
         if is_device_error {
-            if !LAST_WAS_DEVICE_ERROR || OPEN_ERROR_COUNT % 600 == 1 {
-                eprintln!("[COMPOSITOR] ❌ GPU DEVICE REMOVED/SUSPENDED: {:?}", e);
-                LAST_WAS_DEVICE_ERROR = true;
+            let was_device_error = LAST_WAS_DEVICE_ERROR.swap(true, Ordering::Relaxed);
+            if !was_device_error || count % 600 == 1 {
+                tracing::error!("[COMPOSITOR] ❌ GPU DEVICE REMOVED/SUSPENDED: {:?}", e);
             }
             window_state.bevy_texture = None;
             window_state.bevy_srv = None;
         } else {
-            LAST_WAS_DEVICE_ERROR = false;
-            if OPEN_ERROR_COUNT == 1 || OPEN_ERROR_COUNT % 60 == 0 {
-                eprintln!("[COMPOSITOR] ❌ Failed to open Bevy shared resource: {:?} (count: {})", e, OPEN_ERROR_COUNT);
+            LAST_WAS_DEVICE_ERROR.store(false, Ordering::Relaxed);
+            if count == 0 || count % 60 == 0 {
+                tracing::error!("[COMPOSITOR] ❌ Failed to open Bevy shared resource: {:?} (count: {})", e, count + 1);
             }
         }
         return;
@@ -326,15 +377,12 @@ unsafe fn render_bevy_layer(window_state: &mut crate::window::WindowState, conte
 
     // Validate size
     let mut bevy_tex_desc = D3D11_TEXTURE2D_DESC::default();
-    bevy_tex.GetDesc(&mut bevy_tex_desc as *mut _);
+    bevy_tex.GetDesc(&mut bevy_tex_desc as *mut D3D11_TEXTURE2D_DESC);
     let window_size = window_state.winit_window.inner_size();
 
     if bevy_tex_desc.Width != window_size.width || bevy_tex_desc.Height != window_size.height {
-        static mut SIZE_MISMATCH_COUNT: u32 = 0;
-        SIZE_MISMATCH_COUNT += 1;
-        if SIZE_MISMATCH_COUNT == 1 || SIZE_MISMATCH_COUNT % 60 == 0 {
-            eprintln!("[COMPOSITOR] ⚠️ Bevy texture size mismatch - stretching to fit");
-        }
+        static SIZE_MISMATCH_COUNT: AtomicU32 = AtomicU32::new(0);
+        SIZE_MISMATCH_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 
     // Create or reuse SRV
@@ -398,16 +446,16 @@ unsafe fn create_bevy_srv(window_state: &mut crate::window::WindowState, bevy_te
         let hresult = e.code().0;
         let is_device_error = hresult == 0x887A0005_u32 as i32 || hresult == 0x887A0006_u32 as i32 || hresult == 0x887A0007_u32 as i32;
 
-        static mut SRV_ERROR_COUNT: u32 = 0;
-        SRV_ERROR_COUNT += 1;
+        static SRV_ERROR_COUNT: AtomicU32 = AtomicU32::new(0);
+        let count = SRV_ERROR_COUNT.fetch_add(1, Ordering::Relaxed);
         if is_device_error {
-            if SRV_ERROR_COUNT == 1 || SRV_ERROR_COUNT % 600 == 0 {
-                eprintln!("[COMPOSITOR] ❌ GPU device error creating SRV: {:?}", e);
+            if count == 0 || count % 600 == 0 {
+                tracing::error!("[COMPOSITOR] ❌ GPU device error creating SRV: {:?}", e);
             }
             window_state.bevy_texture = None;
             window_state.bevy_srv = None;
-        } else if SRV_ERROR_COUNT == 1 || SRV_ERROR_COUNT % 60 == 0 {
-            eprintln!("[COMPOSITOR] ❌ Failed to create SRV: {:?} (count: {})", e, SRV_ERROR_COUNT);
+        } else if count == 0 || count % 60 == 0 {
+            tracing::error!("[COMPOSITOR] ❌ Failed to create SRV: {:?} (count: {})", e, count + 1);
         }
     }
 

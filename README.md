@@ -1,14 +1,12 @@
 <!-- =============================== -->
-
 <!--        PULSAR ENGINE            -->
-
 <!-- =============================== -->
 
 <!-- LOGO PLACEHOLDER -->
 
 <p align="center">
   <!-- Replace src with your logo -->
-  <img src="https://via.placeholder.com/600x200?text=Pulsar+Engine+Logo" alt="Pulsar Engine Logo (Coming soon)" width="600" />
+  <img src="https://github.com/user-attachments/assets/b8ec0edd-3de9-4b62-8a4e-f1817a9a32aa" alt="Pulsar Engine Logo (Coming soon)" width="200" />
 </p>
 
 <h1 align="center">Pulsar Engine</h1>
@@ -16,6 +14,14 @@
 <p align="center">
   A next‑generation, experimental game engine focused on scalability, modularity, and modern systems design.
 </p>
+
+# ⭐ Support the Project
+
+If Pulsar Engine aligns with how you think game engines should be built, consider supporting the project on GitHub:
+- ⭐ Star the repo to help others discover Pulsar
+- 👀 Watch for updates to follow major architectural changes and milestones
+- 🍴 Fork if you want to experiment or contribute
+Stars and watches directly influence visibility and help justify continued deep-systems work on the engine.
 
 <p align="center">
   <a href="https://discord.gg/5eAKDC53SX">
@@ -108,6 +114,9 @@ If you’re interested in large‑scale multiplayer and server technology, you m
 
 ## Screenshots & Development Media
 
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/09bb96aa-a3c9-4535-8fc4-0bb22d712fc0" />
+<img width="2355" height="1150" alt="image" src="https://github.com/user-attachments/assets/e1e10dc9-2818-4446-90f1-6b241b7f5803" />
+
 <p align="center">
   <img src="https://github.com/user-attachments/assets/1d18a87e-050e-47ed-bbcb-05c4d4850c6d" width="48%" />
   <img src="https://github.com/user-attachments/assets/9097fae6-2ce9-40a2-9581-e692a7b38770" width="48%" />
@@ -133,7 +142,7 @@ If you’re interested in large‑scale multiplayer and server technology, you m
   <img src="https://github.com/user-attachments/assets/ec5a5148-4ba8-45bd-bb8f-d5746a73273f" width="48%" />
 </p>
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/94e058e8-e179-44d1-bfb4-fa20e5ca7637" width="48%" />
+  <img width="26%"  src="https://github.com/user-attachments/assets/57ddbf72-2b2f-42f0-9463-09cc4701401f" />
   <img src="https://github.com/user-attachments/assets/cf4fff8f-4d2f-49b8-ae4b-251dd0c398b7" width="48%" />
 </p>
 <p align="center">

@@ -11,20 +11,15 @@ ui.workspace = true
 
 # UI crates (all of them!)
 ui_common.workspace = true
-ui_editor.workspace = true
+ui_level_editor.workspace = true
 ui_entry.workspace = true
-ui_settings.workspace = true
 ui_multiplayer.workspace = true
-ui_terminal.workspace = true
 ui_problems.workspace = true
+ui_flamegraph.workspace = true
+ui_type_debugger.workspace = true
 ui_file_manager.workspace = true
-ui_loading_screen.workspace = true
-ui_project_launcher.workspace = true
-ui_editor_table.workspace = true
-ui_struct_editor.workspace = true
-ui_enum_editor.workspace = true
-ui_trait_editor.workspace = true
-ui_alias_editor.workspace = true
+ui_plugin_manager.workspace = true
+
 
 # Engine
 engine_state.workspace = true
@@ -33,14 +28,9 @@ engine_backend.workspace = true
 # Plugin system
 plugin_manager = { path = "../../crates/plugin_manager" }
 plugin_editor_api = { path = "../../crates/plugin_editor_api" }
-
-# File operations
-walkdir = "2.4"
-directories = "5"
-
-# Utilities
-anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 schemars = "1.0"
 tracing.workspace = true
+smol = "2"
+futures = "0.3"
+rust-i18n.workspace = true
